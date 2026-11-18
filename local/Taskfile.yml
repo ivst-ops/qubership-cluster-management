@@ -103,7 +103,7 @@ tasks:
         msg: 'Invalid stack name: {{.STACK}}'
       - sh: test -f secrets/{{.STACK}}.yaml
         msg: 'No secrets/{{.STACK}}.yaml; run: task -d local secrets:init STACK={{.STACK}}'
-      - sh: test -n "{{.CLI_ARGS}}"
+      - sh: test -n {{.CLI_ARGS | shellQuote}}
         msg: 'Usage: task -d local secrets:exec STACK=<stack> -- <command>'
     cmds:
       - '{{.AGE}} sops exec-env secrets/{{.STACK}}.yaml {{.CLI_ARGS | shellQuote}}'
@@ -167,7 +167,7 @@ tasks:
     preconditions:
       - sh: echo '{{.STACK}}' | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$'
         msg: 'Invalid stack name: {{.STACK}}'
-      - sh: test -n "{{.CLI_ARGS}}"
+      - sh: test -n {{.CLI_ARGS | shellQuote}}
         msg: 'Usage: task -d local logs:run STACK=<stack> -- <command>'
     cmds:
       # The archive is made on success and on failure; the exit code of the command is kept (local/lab.sh run).

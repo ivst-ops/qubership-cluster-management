@@ -302,24 +302,31 @@ cmd_run() {
     (($#)) || die 'Usage: task -d local logs:run STACK=<stack> -- <command>'
     local started name dir code status
     started=$(date -u +%Y%m%d-%H%M%S)
-    dir=$RUNTIME/logs/$stack-$started
+    # The PID keeps two runs of the same second apart.
+    dir=$RUNTIME/logs/$stack-$started-$$
     mkdir -p "$dir/run"
     printf '%q ' "$@" >"$dir/run/command.txt"
     # Ctrl-C stops the command, not the log collection.
     trap 'echo "Interrupted: collecting logs" >&2' INT
     set +e
-    "$@" 2>&1 | tee "$dir/run/console.log"
+    # tee ignores Ctrl-C: it must stay up until the command (OpenTofu writing its state) has finished.
+    "$@" 2>&1 | (trap '' INT; exec tee "$dir/run/console.log")
     code=${PIPESTATUS[0]}
     set -e
     trap - INT
     ((code == 0)) && status=ok || status=failed
     echo "Collecting logs ($status, exit code $code)"
-    collect_logs "$stack" "$dir" "$code" "$started"
-    name=$stack-$started-$status
-    mv "$dir" "$RUNTIME/logs/$name"
-    tar -czf "$RUNTIME/logs/$name.tar.gz" -C "$RUNTIME/logs" "$name"
-    echo "Logs: .local-runtime/logs/$name.tar.gz"
-    upload_logs "$RUNTIME/logs/$name.tar.gz" || echo "Log upload failed; the archive stays local." >&2
+    # Whatever fails here (a full disk, say) must not change the exit code of the command.
+    collect_logs "$stack" "$dir" "$code" "$started" || echo "Log collection failed." >&2
+    name=$stack-$started-$$-$status
+    if mv "$dir" "$RUNTIME/logs/$name" &&
+        tar -czf "$RUNTIME/logs/$name.tar.gz" -C "$RUNTIME/logs" "$name"; then
+        rm -rf "${RUNTIME:?}/logs/$name"
+        echo "Logs: .local-runtime/logs/$name.tar.gz"
+        upload_logs "$RUNTIME/logs/$name.tar.gz" || echo "Log upload failed; the archive stays local." >&2
+    else
+        echo "Cannot write the log archive; the files stay in $RUNTIME/logs." >&2
+    fi
     return "$code"
 }
 
@@ -341,20 +348,23 @@ EOF
         ("${@:2}") >>"$dir/run/collect.log" 2>&1 || echo "$1: not collected" >>"$dir/run/collect.log"
     }
     config_part() { mkdir -p "$dir/config"; atmos describe stacks -s "$stack" >"$dir/config/stack.yaml"; }
-    # Kubemarine inventory and dump (debug.log, finalized inventory); key files and kubeconfigs are left out.
+    # Kubemarine: the inventory, the finalized inventory and the logs only (an allowlist: the dump also holds
+    # certificates and node files); anything named like a key or certificate is left out.
     installer_part() {
         [[ -d $installer ]] || { echo "no $installer"; return 1; }
         mkdir -p "$dir/kubemarine"
-        tar -C "$installer" --exclude='id_*' --exclude='*.key' --exclude='admin.conf' --exclude='kubeconfig*' -cf - . |
-            tar -C "$dir/kubemarine" -xf -
+        (cd "$installer" && find . -maxdepth 2 -type f \( -name cluster.yaml -o -name cluster_finalized.yaml -o -name '*.log' \) \
+            ! -iname '*key*' ! -name '*.pem' ! -name '*.crt' ! -name '*.conf' -print0 |
+            tar --null -T - -cf -) | tar -C "$dir/kubemarine" -xf -
     }
     # Cluster state, events and container logs, one folder per namespace; needs the API (tunnel for VM stacks).
     kubernetes_part() {
         [[ -f $kubeconfig ]] || { echo "no $kubeconfig"; return 1; }
-        kubectl --kubeconfig "$kubeconfig" --request-timeout=10s get --raw=/readyz >/dev/null
+        # `part` runs in an `||` context, where errexit is off: stop explicitly when the API is down.
+        kubectl --kubeconfig "$kubeconfig" --request-timeout=10s get --raw=/readyz >/dev/null || return 1
         mkdir -p "$dir/kubernetes"
         kubectl --kubeconfig "$kubeconfig" get nodes,pods -A -o wide >"$dir/kubernetes/overview.txt" 2>&1 || true
-        kubectl --kubeconfig "$kubeconfig" cluster-info dump --all-namespaces --output-directory="$dir/kubernetes/dump" >/dev/null
+        kubectl --kubeconfig "$kubeconfig" --request-timeout=60s cluster-info dump --all-namespaces --output-directory="$dir/kubernetes/dump" >/dev/null
     }
     # VM stacks while the jump host exists (after a failure it usually does): Nexus and node service logs.
     vms_part() {

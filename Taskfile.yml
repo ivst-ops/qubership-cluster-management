@@ -42,6 +42,7 @@ vars:
     ATMOS_COMPONENTS_TERRAFORM_APPLY_AUTO_APPROVE TF_PLUGIN_CACHE_DIR TF_CLI_CONFIG_FILE AWS_PROFILE
     HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy
     SOPS_AGE_KEY SOPS_AGE_KEY_FILE SOPS_AGE_KEY_CMD BUNDLE_DIR BUNDLE_MANIFEST NEXUS_ENDPOINT_TIMEOUT
+    LOGS_UPLOAD_URL LOGS_GCS_HMAC_ACCESS_ID LOGS_GCS_HMAC_SECRET AWS_ENDPOINT_URL_S3
   # Prefix that runs a command in the tools container (no stdin: it would swallow the caller's).
   X: >-
     docker exec{{range splitList " " .TOOLS_ENV}} -e {{.}}{{end}} -w "{{.ROOT_DIR}}" {{.TOOLS}}
