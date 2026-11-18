@@ -1,0 +1,7 @@
+# The generator's only dependency, installed by Dockerfile with --require-hashes: wheels for CPython 3.13 on Linux
+# (amd64 and arm64, glibc and musl), from PyPI. Pillow ships its own FreeType, so the result does not depend on the OS.
+pillow==13.0.0 \
+    --hash=sha256:5f56499c1a74d2b862beb0c33b8016f99d095858455df9d21583bbbc1c15b582 \
+    --hash=sha256:19b66ca0a4d25cc0200b381ce824c7ea090db61427315e73cfb05dbf1b35c369 \
+    --hash=sha256:08b826a9bf1265c76de04a42061d61ea6b109418b7826f28ff1ecdfaa26c5502 \
+    --hash=sha256:a2a14cd73d5e6c927f644b0110ee81f59c4ef506259ec9183904747f2caacc81

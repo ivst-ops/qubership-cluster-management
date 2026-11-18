@@ -91,6 +91,7 @@ local/
   lab.sh                                  # Bash part of the operator tasks
   lab/                                    # lab sidecar image: Docker operations for lab.sh over HTTP
 docs/
+  diagrams/                               # draw.io source, PNG previews and their generator container
 ```
 
 Local settings, runtime files, Floci data, and OpenTofu state are excluded from Git.

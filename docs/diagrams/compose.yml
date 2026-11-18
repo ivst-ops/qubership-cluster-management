@@ -1,0 +1,15 @@
+# Regenerates the diagrams: `task docs:diagrams` (or `task docs:diagrams:check`), which passes QCM_UID and QCM_GID so
+# the files keep their owner. Only this directory is mounted, and the container has no network.
+name: qcm-diagrams
+services:
+  diagrams:
+    build: .
+    image: qcm-diagrams:dev
+    # No root default: files written as root would end up in the checkout.
+    user: ${QCM_UID:?run task docs:diagrams}:${QCM_GID:?run task docs:diagrams}
+    network_mode: none
+    environment:
+      # Footer date for one run (the generator's default otherwise); --check compares against the default.
+      - DIAGRAM_SNAPSHOT
+    volumes:
+      - .:/diagrams

@@ -1,0 +1,19 @@
+# Documentation tasks, included by the root Taskfile.yml as `docs:`.
+# The diagrams (docs/diagrams) are generated in a container of a pinned Python and Pillow with the bundled fonts, so
+# Linux, macOS and Windows (WSL 2) produce the same files; it runs as the calling user, so the files keep their owner.
+version: '3'
+
+vars:
+  DIAGRAMS: >-
+    QCM_UID=$(id -u) QCM_GID=$(id -g) docker compose -f '{{.ROOT_DIR}}/docs/diagrams/compose.yml' run --rm --build --quiet-build diagrams
+
+tasks:
+  diagrams:
+    desc: Regenerate the draw.io document and the PNG previews in docs/diagrams
+    cmds:
+      - '{{.DIAGRAMS}}'
+
+  diagrams:check:
+    desc: Fail when the committed diagrams differ from a fresh generation (e.g. the generator changed without them)
+    cmds:
+      - '{{.DIAGRAMS}} --check'
