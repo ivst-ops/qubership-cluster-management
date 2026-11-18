@@ -47,7 +47,7 @@ variable "local_endpoint" {
 }
 
 variable "nexus_wait_for_ready" {
-  description = "Wait for Nexus readiness during Terraform apply"
+  description = "Wait for Nexus readiness during OpenTofu apply"
   type        = bool
   default     = false
 }

@@ -9,7 +9,7 @@ workflows:
       command: terraform apply network -auto-approve
     - name: open-access
       command: workflow open-access -f customers/customer1/kubemarine/aws
-    # Sequential on purpose: jump-host, nexus and vms share one Terraform directory (and its selected workspace),
+    # Sequential on purpose: jump-host, nexus and vms share one OpenTofu module directory (and its selected workspace),
     # so parallel applies would run against each other's state.
     - name: nodes
       command: terraform apply vms -auto-approve

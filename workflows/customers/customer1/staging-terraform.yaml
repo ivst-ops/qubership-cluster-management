@@ -1,6 +1,6 @@
 workflows:
   deploy-staging:
-    description: Deploy staging with Terraform-managed Nexus readiness
+    description: Deploy staging with OpenTofu-managed Nexus readiness
     stack: customer1-aws-staging
     steps:
       - name: network
@@ -28,7 +28,7 @@ workflows:
             type: atmos
             command: workflow deploy-platform -f customers/customer1/staging-terraform
   deploy-nexus:
-    description: Create Nexus and wait for readiness in a single Terraform apply
+    description: Create Nexus and wait for readiness in a single OpenTofu apply
     stack: customer1-aws-staging
     steps:
       - name: apply

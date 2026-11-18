@@ -15,8 +15,8 @@ data "external" "nexus_endpoint" {
 
 locals {
   # Real AWS: derive the URL from aws_instance.nexus.public_ip, falling back to
-  # aws_instance.nexus.private_ip. The Terraform runner must be able to reach it.
-  # Floci on Docker Desktop: external discovers the published host port during
+  # aws_instance.nexus.private_ip. The OpenTofu runner must be able to reach it.
+  # Floci (local lab): external discovers the published host port during
   # the same apply. No endpoint script is invoked for real AWS.
   nexus_readiness_endpoint = var.nexus_readiness_url != null ? var.nexus_readiness_url : (
     var.local_endpoint != null ? (
