@@ -351,7 +351,8 @@ tasks:
       ATMOS_COMPONENTS_TERRAFORM_APPLY_AUTO_APPROVE: 'true'
     cmds:
       - task: lab:trust
-      - '{{.X}} atmos workflow {{.DEPLOY}} -f {{.WORKFLOWS}}'
+      # logs:run keeps the console output and collects the cluster state into .local-runtime/logs, also on failure.
+      - '{{.X}} task -d local logs:run STACK={{.STACK}} -- atmos workflow {{.DEPLOY}} -f {{.WORKFLOWS}}'
 
   lab:check:
     desc: 'Show the pods and Helm releases of STACK (default {{.STACK}})'
@@ -391,13 +392,13 @@ tasks:
           {{.X}} task -d local {{if eq .CLOUD "azure"}}prepare-azure{{else}}prepare{{end}} STACK={{.STACK}} ||
           { echo "The cluster of {{.STACK}} is in the OpenTofu state but prepare cannot reach it: remove the state of the stack if its lab is gone." >&2; false; }
         if: test "{{.CLUSTERS}}" -gt 0 -a ! -s {{.KUBECONFIG_FILE}}
-      - cmd: '{{.X}} atmos workflow {{.DESTROY}} -f {{.WORKFLOWS}}'
+      - cmd: '{{.X}} task -d local logs:run STACK={{.STACK}} -- atmos workflow {{.DESTROY}} -f {{.WORKFLOWS}}'
         if: test "{{.CLUSTERS}}" -gt 0
       - cmd: 'echo "Nothing deployed in {{.STACK}} (no network and no cluster in the state): nothing to destroy."'
         if: test "{{.CLUSTERS}}" -eq 0 -a "{{.NETWORKS}}" -eq 0
       - cmd: |-
           echo 'No cluster in the state of {{.STACK}}: skipping the services in the cluster.'
-          {{.X}} atmos workflow destroy-infra -f {{.WORKFLOWS}}
+          {{.X}} task -d local logs:run STACK={{.STACK}} -- atmos workflow destroy-infra -f {{.WORKFLOWS}}
         if: test "{{.CLUSTERS}}" -eq 0 -a "{{.NETWORKS}}" -gt 0
       # Floci keeps a deleted cluster's k3s data in the volume floci-aws-[sN-]eks-<cluster>; a new cluster with the same
       # name would reuse it and fail on the old node address. Remove such volumes once no container uses them.
@@ -405,7 +406,7 @@ tasks:
         docker volume ls -q --filter dangling=true | grep -E '^floci-aws-(s[0-9]+-)?eks-' | xargs -r docker volume rm >/dev/null
 
   lab:diagnostics:
-    desc: Containers, pods and recent events, for a failed deployment
+    desc: 'Containers, pods and recent events on the host console (the log archives are made by logs:run)'
     deps: [tools:up]
     ignore_error: true
     cmds:

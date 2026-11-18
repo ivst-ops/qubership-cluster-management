@@ -156,3 +156,22 @@ tasks:
     requires: {vars: [STACK, HOST]}
     cmds:
       - bash local/lab.sh ssh {{.STACK}} {{.HOST}} {{.CLI_ARGS}}
+
+  # --- Run logs ----------------------------------------------------------------------------------------------
+
+  logs:run:
+    desc: 'Run the command after -- (with the secrets of STACK, if it has any) and collect its logs into .local-runtime/logs; LOGS_UPLOAD_URL uploads them'
+    dir: '{{.REPO}}'
+    interactive: true
+    requires: {vars: [STACK]}
+    preconditions:
+      - sh: echo '{{.STACK}}' | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$'
+        msg: 'Invalid stack name: {{.STACK}}'
+      - sh: test -n "{{.CLI_ARGS}}"
+        msg: 'Usage: task -d local logs:run STACK=<stack> -- <command>'
+    cmds:
+      # The archive is made on success and on failure; the exit code of the command is kept (local/lab.sh run).
+      - cmd: '{{.AGE}} sops exec-env secrets/{{.STACK}}.yaml {{printf "bash local/lab.sh run %s %s" .STACK .CLI_ARGS | shellQuote}}'
+        if: test -f secrets/{{.STACK}}.yaml
+      - cmd: bash local/lab.sh run {{.STACK}} {{.CLI_ARGS}}
+        if: test ! -f secrets/{{.STACK}}.yaml
