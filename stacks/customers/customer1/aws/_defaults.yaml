@@ -3,7 +3,8 @@ import:
 vars:
   cloud: aws
   region: us-east-1
-  local_endpoint: http://localhost:4566
+  # Floci of the lab environment of this checkout (local/lab-env.sh); 4566 in slot 0.
+  local_endpoint: 'http://localhost:{{ env "QCM_LAB_AWS_PORT" | default "4566" }}'
 settings:
   local_lab: true
 env:

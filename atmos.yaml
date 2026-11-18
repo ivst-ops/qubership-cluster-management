@@ -14,3 +14,12 @@ stacks:
   name_template: "{{ .vars.tenant }}-{{ .vars.cloud }}-{{ .vars.stage }}"
 workflows:
   base_path: workflows
+# Go templates in stack manifests, with Sprig: the local lab stacks take their environment names, endpoints and VPC
+# ranges from the lab environment of the checkout (QCM_LAB_* in the tools container, see local/lab-env.sh).
+templates:
+  settings:
+    enabled: true
+    sprig:
+      enabled: true
+    gomplate:
+      enabled: false

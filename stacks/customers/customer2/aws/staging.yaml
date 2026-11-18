@@ -9,7 +9,9 @@ import:
   - catalog/helmfile/headlamp
 vars:
   stage: staging
-  environment: customer2-staging
+  # Environment names carry the suffix of the lab environment (-sN, none in slot 0): Floci names Docker containers
+  # and volumes after them, and labs of several checkouts share one Docker host.
+  environment: 'customer2-staging{{ env "QCM_LAB_SUFFIX" }}'
 env:
   KUBECONFIG: ../../../.local-runtime/kubeconfig-customer2-aws-staging.yaml
 helmfile:
@@ -26,13 +28,13 @@ components:
       metadata:
         terraform_workspace: customer2-aws-staging
       vars:
-        vpc_cidr: 10.50.0.0/16
+        vpc_cidr: '10.{{ add 50 (mul 16 (env "QCM_LAB_SLOT" | default "0" | atoi)) }}.0.0/16'
         subnets:
           a:
-            cidr_block: 10.50.1.0/24
+            cidr_block: '10.{{ add 50 (mul 16 (env "QCM_LAB_SLOT" | default "0" | atoi)) }}.1.0/24'
             availability_zone: us-east-1a
           b:
-            cidr_block: 10.50.2.0/24
+            cidr_block: '10.{{ add 50 (mul 16 (env "QCM_LAB_SLOT" | default "0" | atoi)) }}.2.0/24'
             availability_zone: us-east-1b
   helmfile:
     argocd:
