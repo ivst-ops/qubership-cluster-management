@@ -296,8 +296,12 @@ Validation prints `All stacks validated successfully`. Dry-run lists the top-lev
 ## 5. Deploy
 
 ```bash
-task -d local secrets:exec STACK="$stack" -- atmos workflow deploy-vm -f "$workflow"
+task -d local logs:run STACK="$stack" -- atmos workflow deploy-vm -f "$workflow"
 ```
+
+`logs:run` runs the command with the stack secrets (like `secrets:exec`) and collects the logs of the run, see
+[Run logs](#run-logs). Without it, `task -d local secrets:exec STACK="$stack" -- atmos workflow deploy-vm -f "$workflow"`
+deploys the same way.
 
 Expected durations; most of the time is Kubemarine and the bundle upload:
 
@@ -318,6 +322,33 @@ the final inventory stays in `.local-runtime/kubemarine/$stack/dump`.
 The workflow ends with `close-access`: the jump host is destroyed, so nothing in the environment accepts connections
 from outside. If a step fails, fix the cause and run the same command again. Applied OpenTofu components change
 nothing, Kubemarine does not reinstall, and the bundle upload skips what Nexus already has.
+
+### Run logs
+
+`task -d local logs:run STACK="$stack" -- <command>` runs any command of this guide (a workflow, `atmos terraform
+apply ...`) with the stack secrets and, when it ends, successfully or not, writes one archive:
+`.local-runtime/logs/<stack>-<UTC time>-<ok|failed>.tar.gz`. The command keeps its console output and exit status.
+Every part is optional; what cannot be reached is noted in `run/collect.log` and skipped.
+
+| In the archive | Content |
+|---|---|
+| `run/` | `summary.txt` (command, exit code, times, commit), `console.log`, `collect.log` |
+| `config/stack.yaml` | `atmos describe stacks -s <stack>` |
+| `kubemarine/` | `.local-runtime/kubemarine/<stack>`: inventory, `dump`, `debug.log`; keys and kubeconfigs are left out |
+| `kubernetes/` | `cluster-info dump` of all namespaces (state, events, container logs), needs the API (the tunnel) |
+| `nexus/`, `nodes/` | Nexus log and the containerd and kubelet journals of the nodes, while the jump host exists |
+
+The archive can contain whatever the tools print and the stack configuration: do not publish it. Set
+`LOGS_UPLOAD_URL` (in `secrets/<stack>.yaml` or the environment) to upload it as well:
+
+| `LOGS_UPLOAD_URL` | Storage | Credentials |
+|---|---|---|
+| `s3://bucket/prefix` | AWS S3, or S3-compatible with `AWS_ENDPOINT_URL_S3` | The usual AWS variables or profile |
+| `https://ACCOUNT.blob.core.windows.net/CONTAINER/prefix?SAS` | Azure Blob Storage | The container SAS with write rights is in the URL |
+| `gs://bucket/prefix` | Google Cloud Storage through its S3 interoperability API | An HMAC key in `LOGS_GCS_HMAC_ACCESS_ID` and `LOGS_GCS_HMAC_SECRET` |
+
+The tools image has the AWS CLI and curl, not `gcloud` or `az`, hence these forms. A failed upload is reported and the
+archive stays local. In CI the archive of each `deploy` job is the artifact `logs-<stack>-attempt<N>` (14 days).
 
 ## 6. Work with the cluster later
 
@@ -373,7 +404,7 @@ task -d local secrets:exec STACK="$stack" -- atmos terraform apply kubemarine -s
 ## 7. Destroy
 
 ```bash
-task -d local secrets:exec STACK="$stack" -- atmos workflow destroy-vm -f "$workflow"
+task -d local logs:run STACK="$stack" -- atmos workflow destroy-vm -f "$workflow"
 ```
 
 Destroy stops the tunnel and removes the installer state, VMs, Nexus, jump host, and network. OpenTofu state is local
