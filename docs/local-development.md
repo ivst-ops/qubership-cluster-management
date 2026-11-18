@@ -266,3 +266,10 @@ A Helm release that fails with `context deadline exceeded` while its pod is stil
 pull) needs more time, not a fix: raise `helm_timeout` (seconds; default 600, the lab stacks set 1200) in the
 stack's top-level `helmfile.vars` section, or per component in `components.helmfile.<name>.vars`, then resume the
 workflow from that step with `--from-step`.
+A chart download that fails with `Client.Timeout exceeded while awaiting headers` (GitHub release assets sometimes
+answer slowly) is retried: a `prepare` hook of each release (`components/helmfile/warm-chart.sh`) puts the chart into
+helm's content cache with up to 5 attempts (`CHART_WARM_ATTEMPTS`) before helm diff and upgrade, which then read it
+from the cache. The cache is per checkout (`.local-runtime/home/.cache/helm/content`), so the first deploy of a new
+checkout downloads each chart once. Each attempt and its error are printed after `hook[prepare] logs |` (stdout only;
+helmfile drops a hook's stderr). If all attempts fail, the step fails with helm's own error: resume it with
+`--from-step`.

@@ -11,10 +11,22 @@ releases:
     createNamespace: true
     chart: istio/base
     version: {{ .Values.chart_version | quote }}
+    hooks:
+      # Chart into helm's content cache, with retries, before helm diff and upgrade (../warm-chart.sh).
+      - events: [prepare]
+        showlogs: true
+        command: sh
+        args: [../warm-chart.sh, istio/base, {{ .Values.chart_version | quote }}]
     values: [values-base.yaml.gotmpl]
   - name: istiod
     namespace: istio-system
     chart: istio/istiod
     version: {{ .Values.chart_version | quote }}
+    hooks:
+      # Chart into helm's content cache, with retries, before helm diff and upgrade (../warm-chart.sh).
+      - events: [prepare]
+        showlogs: true
+        command: sh
+        args: [../warm-chart.sh, istio/istiod, {{ .Values.chart_version | quote }}]
     needs: [istio-system/istio-base]
     values: [values-istiod.yaml.gotmpl]

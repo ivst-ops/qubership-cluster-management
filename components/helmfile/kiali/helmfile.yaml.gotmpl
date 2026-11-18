@@ -11,6 +11,12 @@ releases:
     createNamespace: true
     chart: kiali/kiali-operator
     version: {{ .Values.chart_version | quote }}
+    hooks:
+      # Chart into helm's content cache, with retries, before helm diff and upgrade (../warm-chart.sh).
+      - events: [prepare]
+        showlogs: true
+        command: sh
+        args: [../warm-chart.sh, kiali/kiali-operator, {{ .Values.chart_version | quote }}]
     disableValidationOnInstall: true
     values:
       - values.yaml.gotmpl
