@@ -55,7 +55,7 @@ components:
       metadata:
         terraform_workspace: customer1-aws-staging
       vars:
-        kubeconfig_path: ../../../../.local-runtime/kubeconfig-customer1-aws-staging.yaml  
+        kubeconfig_path: ../../../../.local-runtime/kubeconfig-customer1-aws-staging.yaml
     ingress-wait:
       metadata:
         terraform_workspace: customer1-aws-staging
