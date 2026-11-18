@@ -17,6 +17,8 @@ resource "azurerm_network_security_group" "main" {
     source_address_prefixes    = var.allowed_cidrs
     destination_address_prefix = "*"
   }
+
+  tags = local.cost_tags
 }
 
 resource "azurerm_public_ip" "vm" {
@@ -27,6 +29,8 @@ resource "azurerm_public_ip" "vm" {
   resource_group_name = var.resource_group_name
   allocation_method   = "Static"
   sku                 = "Standard"
+
+  tags = local.cost_tags
 }
 
 resource "azurerm_network_interface" "vm" {
@@ -42,6 +46,8 @@ resource "azurerm_network_interface" "vm" {
     private_ip_address_allocation = "Dynamic"
     public_ip_address_id          = var.public ? azurerm_public_ip.vm[each.key].id : null
   }
+
+  tags = local.cost_tags
 }
 
 resource "azurerm_network_interface_security_group_association" "vm" {
@@ -79,9 +85,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
     version   = var.image.version
   }
 
-  tags = {
-    Environment = var.environment
-    Role        = join(",", concat([var.name], each.value.roles))
-    ManagedBy   = "terraform"
-  }
+  tags = merge(local.cost_tags, {
+    Role = join(",", concat([var.name], each.value.roles))
+  })
 }

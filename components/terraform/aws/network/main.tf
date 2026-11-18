@@ -5,9 +5,7 @@ resource "aws_vpc" "main" {
   enable_dns_hostnames = true
 
   tags = {
-    Name        = "${var.environment}-vpc"
-    Environment = var.environment
-    ManagedBy   = "terraform"
+    Name = "${var.environment}-vpc"
   }
 }
 
@@ -20,9 +18,7 @@ resource "aws_subnet" "main" {
   availability_zone = each.value.availability_zone
 
   tags = {
-    Name        = "${var.environment}-subnet-${each.key}"
-    Environment = var.environment
-    ManagedBy   = "terraform"
+    Name = "${var.environment}-subnet-${each.key}"
   }
 }
 

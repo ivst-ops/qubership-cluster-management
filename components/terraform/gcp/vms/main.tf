@@ -41,6 +41,9 @@ resource "google_compute_instance" "vm" {
     initialize_params {
       image = var.image
       size  = each.value.volume_size
+      # default_labels do not reach the boot disk. initialize_params is ForceNew, so the labels are set on new VMs
+      # only (ignore_changes below): adding them must not recreate running VMs.
+      labels = local.cost_tags
     }
   }
 
@@ -58,8 +61,10 @@ resource "google_compute_instance" "vm" {
   }
 
   labels = {
-    environment = var.environment
-    role        = replace(join("_", concat([var.name], each.value.roles)), "-", "_")
-    managed_by  = "terraform"
+    role = replace(join("_", concat([var.name], each.value.roles)), "-", "_")
+  }
+
+  lifecycle {
+    ignore_changes = [boot_disk[0].initialize_params[0].labels]
   }
 }

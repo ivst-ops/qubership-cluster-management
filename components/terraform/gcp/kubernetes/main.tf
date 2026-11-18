@@ -45,6 +45,8 @@ resource "google_container_node_pool" "main" {
     service_account = google_service_account.nodes.email
     oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
     workload_metadata_config { mode = "GKE_METADATA" }
+    # The node VMs and their disks (default_labels do not reach node_config); updated in place by NodePools.Update.
+    resource_labels = local.cost_tags
   }
   depends_on = [google_project_iam_member.nodes]
 }

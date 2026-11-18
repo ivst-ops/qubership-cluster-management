@@ -26,14 +26,16 @@ resource "aws_instance" "nexus" {
     http_tokens                 = "required"
     http_put_response_hop_limit = 1
   }
+
   root_block_device {
     encrypted = true
+    # default_tags do not reach the root volume.
+    tags = local.cost_tags
   }
+
   tags = {
-    Name        = "${var.environment}-nexus"
-    Environment = var.environment
-    Role        = "nexus"
-    ManagedBy   = "terraform"
+    Name = "${var.environment}-nexus"
+    Role = "nexus"
   }
 
   user_data = replace(templatefile("${path.module}/user-data.sh.tftpl", {

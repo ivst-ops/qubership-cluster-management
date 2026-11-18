@@ -17,3 +17,15 @@ variable "service_cidr" {
   type    = string
   default = "10.110.0.0/20"
 }
+
+variable "tenant" {
+  description = "Customer identifier supplied by Atmos"
+  type        = string
+  default     = null
+}
+
+variable "stage" {
+  description = "Environment stage supplied by Atmos"
+  type        = string
+  default     = null
+}

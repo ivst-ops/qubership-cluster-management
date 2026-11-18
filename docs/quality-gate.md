@@ -8,6 +8,7 @@ workflow (`.github/workflows/lint.yml`).
 
 | Task | Checks | Settings |
 |---|---|---|
+| `lint:copies` | Every `components/terraform/<cloud>/<module>/cost_tags.tf` is identical to the one in `aws/network` | `taskfiles/lint.yml` |
 | `lint:tflint` | OpenTofu modules under `components/terraform`: the bundled `terraform` ruleset, `recommended` preset, naming, required versions and providers | `.tflint.hcl` |
 | `lint:trivy` | (1) `trivy fs`: secrets in the working tree, Dockerfiles, plain Kubernetes YAML; (2) `trivy config` per OpenTofu module, with the module's `trivy.tfvars` when it has one | `trivy.yaml` |
 | `lint:yamllint` | Syntax, duplicate keys, indentation of stacks, workflows and CI files (`*.gotmpl` is not plain YAML and is skipped); line length over 160 is a warning only | `.yamllint.yaml` |
@@ -101,3 +102,43 @@ Before the apply:
 - Run `tofu plan` and check that only the listed resources are replaced. Do not apply on a stack whose Nexus holds the
   only copy of artifacts.
 
+## Cost-allocation tags
+
+The cloud resources of a stack carry the same tags (labels on GCP):
+
+| Tag | Value |
+|---|---|
+| `tenant`, `stage`, `environment`, `cloud` | Atmos stack vars |
+| `managed-by` | `qubership-cluster-management` |
+
+Extra tags come from the `cost_tags` var. Set it in the `terraform` section of a stack, for example in a customer's
+`_defaults.yaml`, so that it reaches the Terraform components only, not the Helmfile ones:
+
+```yaml
+terraform:
+  vars:
+    cost_tags:
+      cost-center: cc-1234
+      owner: platform-team
+```
+
+Only the cloud modules (`components/terraform/aws|azure|gcp/*`) declare it. `kubernetes/*` and `kubemarine` create
+in-cluster objects, not cloud resources, so they are not tagged; OpenTofu warns about the undeclared value there and
+ignores it.
+
+**Replaced tags.** Before these tags the modules set `Environment` and `ManagedBy = "terraform"` (AWS, Azure VMs) and
+the labels `environment` and `managed_by = "terraform"` (GCP VMs). They are gone: the next apply of an existing stack
+retags its resources in place (`Environment` becomes `environment`, `ManagedBy`/`managed_by` becomes `managed-by` with
+the value `qubership-cluster-management`). Cost reports, budgets and policies that select on the old keys or on
+`terraform` must switch to the new ones. `Name` and `Role` stay.
+
+The mandatory tags win over extra keys of the same name. Keys and values follow the GCP label rules (lowercase
+letters, digits, `_` and `-`, up to 63 characters), so a stack tags the same way on every cloud; mandatory values are
+lowercased and other characters replaced with `-`. Each cloud module has the same `cost_tags.tf` (`task lint:copies`
+checks it); copies, not a symlink, because a Windows checkout without `core.symlinks` turns a symlink into a text file.
+
+| Cloud | How | Not tagged |
+|---|---|---|
+| AWS | Provider `default_tags`; the EC2 root volumes explicitly (`root_block_device.tags`) | — |
+| GCP | Provider `default_labels`; the GKE node VMs and disks through `node_config.resource_labels` (updated in place); the VM boot disks through `boot_disk.initialize_params.labels` | Boot disks of VMs that existed before the labels: `initialize_params` is ForceNew, so the labels are ignored on existing VMs (`ignore_changes`) instead of recreating them |
+| Azure | `tags` on each taggable resource; the AKS node pool (`default_node_pool.tags`: the scale set and its instances); the cluster tags reach the node resource group and the resources AKS creates there (load balancer, public IPs, NSG, route table, identities) | OS disks of the VMs (`os_disk` has no tags, and VM tags are not copied to the disk) and of the AKS nodes. Cover them with Azure Cost Management tag inheritance (subscription or resource group tags applied to the cost records) |
