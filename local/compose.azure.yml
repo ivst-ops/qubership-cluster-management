@@ -1,17 +1,57 @@
-name: atmos-local-azure
+# Start with `task lab:up CLOUD=azure` from devbox shell (Taskfile.yml); names and host ports come from the lab
+# environment of this checkout (.local-runtime/lab.env, local/lab-env.sh). Slot 0: project atmos-local-azure, 4577.
+name: ${QCM_LAB_AZURE_PROJECT:?run task lab:up}
 services:
+  # Docker operations for local/lab.sh in the tools container (local/lab/lab-api.sh). Host network, listening on
+  # 127.0.0.1 only, and every request needs the token of `task lab:up`.
+  lab:
+    build: ./lab
+    image: qcm-floci-lab:local
+    network_mode: host
+    # Not root: the user of this checkout (owner of the 0600 token) plus the group of the Docker socket.
+    user: "${QCM_LAB_UID:?run task lab:up}:${QCM_LAB_GID:?run task lab:up}"
+    group_add: ["${QCM_LAB_DOCKER_GID:?run task lab:up}"]
+    environment:
+      LAB_PROJECT: ${QCM_LAB_AZURE_PROJECT}
+      LAB_PORT: "${QCM_LAB_AZURE_API_PORT:?run task lab:up}"
+      LAB_NETWORK: ${QCM_LAB_NETWORK:?run task lab:up}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../.local-runtime/lab-token:/run/lab-token:ro
+
+
   floci-az:
     image: floci/floci-az:nightly@sha256:b3e3623da140fae2b98997558cecb13cbf8f67ade2bd6e8d725cbd1d62322f12
+    networks:
+      default:
+        # Keep the default route on the project network when Floci Azure joins networks it creates (see compose.yml).
+        gw_priority: 100
     ports:
-      - "127.0.0.1:4577:4577"
+      # Same port inside and outside: Floci Azure advertises it in its metadata and kubeconfigs.
+      - "127.0.0.1:${QCM_LAB_AZURE_PORT:?run task lab:up}:${QCM_LAB_AZURE_PORT}"
+    # The image's healthcheck.sh probes port 4577; the port of this slot is FLOCI_AZ_PORT.
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/$$FLOCI_AZ_PORT &&
+          printf 'GET /_floci/health HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 &&
+          read -r _ status _ <&3 && [ "$$status" = 200 ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     environment:
+      FLOCI_AZ_PORT: "${QCM_LAB_AZURE_PORT}"
+      FLOCI_AZ_BASE_URL: "https://localhost:${QCM_LAB_AZURE_PORT}"
       FLOCI_AZ_TLS_ENABLED: "true"
       FLOCI_AZ_STORAGE_MODE: persistent
       FLOCI_AZ_STORAGE_PATH: /app/data
       FLOCI_AZ_SERVICES_AKS_MOCKED: "false"
       FLOCI_AZ_SERVICES_AKS_KEEP_RUNNING_ON_SHUTDOWN: "true"
-      FLOCI_AZ_SERVICES_AKS_API_SERVER_BASE_PORT: "6600"
-      FLOCI_AZ_SERVICES_AKS_API_SERVER_MAX_PORT: "6699"
+      FLOCI_AZ_SERVICES_AKS_API_SERVER_BASE_PORT: "${QCM_LAB_AKS_PORT_MIN:?run task lab:up}"
+      FLOCI_AZ_SERVICES_AKS_API_SERVER_MAX_PORT: "${QCM_LAB_AKS_PORT_MAX:?run task lab:up}"
     volumes:
       - ./floci-azure-data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock

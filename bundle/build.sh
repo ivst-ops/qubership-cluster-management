@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Downloads everything listed in bundle/manifest.yaml into one directory that bundle/load.sh uploads into Nexus.
-# Needs Internet, docker, curl, helm, crane and yq (all in the tools image). Re-running skips what is already there.
+# Needs Internet, curl, helm, crane and yq (all in the tools image). Re-running skips what is already there.
+# Usually started as `task bundle` from the host, which then builds the node packages (apt/): `task bundle:apt`.
 #   BUNDLE_DIR       output directory (default .local-runtime/bundle)
 #   BUNDLE_MANIFEST  manifest to read (default bundle/manifest.yaml)
 set -euo pipefail
@@ -22,22 +23,8 @@ fetch "$(m .nexus.source)" "$out/nexus.tar.gz"
 echo 'Kubemarine files'
 m '.files | to_entries[] | .key + " " + .value' | while read -r path url; do fetch "$url" "$out/files/$path"; done
 
-echo "Node packages from $(m .os.image)"
-if [[ ! -s $out/apt/Packages ]]; then
-    # The closure is resolved in a clean container of the node OS release; virtual packages have no candidate.
-    cid=$(docker create "$(m .os.image)" bash -c '
-        set -eu
-        apt-get update -qq && apt-get install -y -qq --no-install-recommends apt-utils >/dev/null
-        mkdir -p /debs && chmod 777 /debs && cd /debs
-        apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces \
-            --no-enhances "$@" | grep -E "^[a-z0-9]" | sort -u > /tmp/names
-        apt-get download -qq $(xargs apt-cache policy < /tmp/names |
-            awk "/^[a-z0-9].*:\$/ {n=\$1} /Candidate:/ && \$2 != \"(none)\" {sub(\":\$\",\"\",n); print n}")
-        apt-ftparchive packages . > Packages' bash $(m '.os.packages[]'))
-    docker start -a "$cid" >/dev/null
-    rm -rf "$out/apt" && docker cp "$cid:/debs" "$out/apt"
-    docker rm "$cid" >/dev/null
-fi
+# Node packages come from a container of the node OS, which the host starts (bundle/compose.yml): write its inputs.
+printf 'OS_IMAGE=%s\nOS_PACKAGES=%s\n' "$(m .os.image)" "$(m '.os.packages | join(" ")')" >"$out/apt.env"
 
 echo 'Helm charts'
 mkdir -p "$out/charts"
@@ -53,4 +40,9 @@ m '(.images | to_entries[] | .key + " " + .value), (.app_images[] | . + " " + .)
     [[ -s $file ]] || { mkdir -p "$out/images"; crane pull --platform linux/amd64 "$source" "$file.part" && mv "$file.part" "$file"; }
 done
 
-echo "Bundle ready: $out ($(du -sh "$out" | cut -f1)). Move it as is (or as one tar) to the operator machine."
+if [[ -s $out/apt/Packages ]]; then
+    echo "Bundle ready: $out ($(du -sh "$out" | cut -f1)). Move it as is (or as one tar) to the operator machine."
+else
+    echo "Bundle ready except node packages ($(m .os.image)). From the host shell in the repository root, run:"
+    echo "  task bundle:apt${BUNDLE_DIR:+ BUNDLE_DIR=${out#"$PWD/"}}"
+fi

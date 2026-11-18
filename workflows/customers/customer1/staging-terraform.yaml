@@ -11,7 +11,7 @@ workflows:
         command: terraform apply kubernetes --from-plan -input=false -auto-approve
       - name: access
         type: shell
-        command: pwsh -NoProfile -File ./local/scripts/Prepare-Cluster.ps1 -Stack customer1-aws-staging
+        command: task -d local prepare STACK=customer1-aws-staging
       - name: services
         type: parallel
         max_concurrency: 2
@@ -78,6 +78,14 @@ workflows:
     steps:
       - name: load-balancer
         command: terraform destroy load-balancer -auto-approve
+      - name: services
+        command: workflow destroy-services -f customers/customer1/staging-terraform
+      - name: kubernetes
+        command: terraform destroy kubernetes -auto-approve
+  destroy-services:
+    description: Remove the Kiali instance and the Helm releases in the cluster (task lab:destroy skips it when the state holds no cluster)
+    stack: customer1-aws-staging
+    steps:
       - name: kiali-instance
         type: shell
         # Without the Kiali CRD (a deploy that stopped before kiali) there is nothing to delete; --ignore-not-found does
@@ -96,5 +104,11 @@ workflows:
         command: helmfile destroy argocd
       - name: istio
         command: helmfile destroy istio
-      - name: kubernetes
-        command: terraform destroy kubernetes -auto-approve
+  destroy-infra:
+    description: Remove Nexus and the network of a stack without a cluster (task lab:destroy runs it when the state holds none)
+    stack: customer1-aws-staging
+    steps:
+      - name: nexus
+        command: terraform destroy nexus -auto-approve -var=nexus_wait_for_ready=false
+      - name: network
+        command: terraform destroy network -auto-approve

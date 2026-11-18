@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.18.4/.schema/devbox.schema.json",
+  "packages": [
+    "go-task@3.53.1",
+    "github-cli@2.104.0"
+  ],
+  "shell": {
+    "init_hook": [
+      "echo 'Developer tools ready. `task --list` shows the tasks; Docker and Docker Compose come from the host.' >&2"
+    ],
+    "scripts": {
+      "test": "task test",
+      "e2e": "task e2e",
+      "lab-list": "task lab:list",
+      "lab-stop-all": "task lab:stop-all"
+    }
+  }
+}

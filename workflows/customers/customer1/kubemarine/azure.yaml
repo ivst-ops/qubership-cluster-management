@@ -1,5 +1,5 @@
-# Isolated VM installation (docs/vm-installation.md). Every workflow needs the stack secrets (run = with-secrets + logs):
-#   local/lab.sh run customer1-azure-staging-kubemarine atmos workflow deploy-vm -f customers/customer1/kubemarine/azure
+# Isolated VM installation (docs/vm-installation.md). Every workflow needs the stack secrets:
+#   task -d local secrets:exec STACK=customer1-azure-staging-kubemarine -- atmos workflow deploy-vm -f customers/customer1/kubemarine/azure
 workflows:
   deploy-vm:
     description: 'Deploy customer1 Azure staging (Kubemarine on VMs): network, jump host, nodes, Nexus, Kubemarine, apps; closes access at the end'
@@ -19,7 +19,7 @@ workflows:
       command: terraform apply kubemarine -auto-approve
     - name: access
       type: shell
-      command: bash ./local/lab.sh prepare-vms customer1-azure-staging-kubemarine
+      command: task -d local prepare-vms STACK=customer1-azure-staging-kubemarine
     - name: apps
       command: workflow deploy-apps -f customers/customer1/kubemarine/azure
     - name: close-access
@@ -32,10 +32,10 @@ workflows:
       command: terraform apply nexus -auto-approve
     - name: nexus-install
       type: shell
-      command: bash ./local/lab.sh nexus-install customer1-azure-staging-kubemarine
+      command: task -d local nexus:install STACK=customer1-azure-staging-kubemarine
     - name: nexus-load
       type: shell
-      command: bash ./local/lab.sh nexus-load customer1-azure-staging-kubemarine
+      command: task -d local nexus:load STACK=customer1-azure-staging-kubemarine
   deploy-apps:
     description: 'Install apps from Nexus through the tunnel (needs open-access)'
     stack: customer1-azure-staging-kubemarine
@@ -58,14 +58,14 @@ workflows:
       command: terraform apply jump-host -auto-approve
     - name: tunnel
       type: shell
-      command: bash ./local/lab.sh tunnel customer1-azure-staging-kubemarine
+      command: task -d local tunnel STACK=customer1-azure-staging-kubemarine
   close-access:
     description: 'Stop the tunnel and destroy the jump host (MoM step 3); open-access brings it back'
     stack: customer1-azure-staging-kubemarine
     steps:
     - name: tunnel
       type: shell
-      command: bash ./local/lab.sh tunnel customer1-azure-staging-kubemarine stop
+      command: task -d local tunnel:stop STACK=customer1-azure-staging-kubemarine
     - name: jump-host
       command: terraform destroy jump-host -auto-approve
   destroy-vm:
@@ -74,7 +74,7 @@ workflows:
     steps:
     - name: tunnel
       type: shell
-      command: bash ./local/lab.sh tunnel customer1-azure-staging-kubemarine stop
+      command: task -d local tunnel:stop STACK=customer1-azure-staging-kubemarine
     - name: kubemarine
       command: terraform destroy kubemarine -auto-approve
     - name: vms

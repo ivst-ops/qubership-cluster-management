@@ -8,10 +8,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-: "${NEXUS_URL:?}" "${NEXUS_ADMIN_PASSWORD:?Run through local/lab.sh with-secrets <stack>}"
+: "${NEXUS_URL:?}" "${NEXUS_ADMIN_PASSWORD:?Run through task -d local secrets:exec STACK=<stack>}"
 bundle=${BUNDLE_DIR:-$PWD/.local-runtime/bundle}
 registry="${NEXUS_URL#*://}" registry="${registry%:*}:8082"
-[[ -f $bundle/manifest.yaml ]] || { echo "No bundle in $bundle; run bundle/build.sh" >&2; exit 1; }
+[[ -f $bundle/manifest.yaml ]] || { echo "No bundle in $bundle; run task bundle on the host" >&2; exit 1; }
 
 api() { curl -fsS -u "admin:$NEXUS_ADMIN_PASSWORD" -H 'Content-Type: application/json' "$@"; }
 

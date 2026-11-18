@@ -1,28 +1,53 @@
-name: atmos-local
+# Start with `task lab:up` from devbox shell (Taskfile.yml); it leases the lab environment of this checkout
+# (local/lab-env.sh) and runs docker compose -f local/compose.yml up -d --build --wait with its QCM_LAB_* values
+# (.local-runtime/lab.env). Every name, address and host port below comes from that slot, so labs of several checkouts
+# run side by side on one Docker host; slot 0 has the slot-0 layout (project atmos-local, ports 4566, 80, 4500).
+name: ${QCM_LAB_PROJECT:?run task lab:up}
 services:
   floci:
-    image: floci/floci:latest
+    # Pinned (2.5.0) like the other images: latest moved under running labs. Update the tag and digest together.
+    image: floci/floci:2.5.0@sha256:a0fbf944d7f338cc0856f1ef83831ea749ff2be71956eb7a7fce08fc21458e19
     networks:
       default:
-        ipv4_address: 172.18.0.2
+        ipv4_address: ${QCM_LAB_FLOCI_IP:?run task lab:up}
+        # Floci joins every VPC network it creates; without a priority Docker may move the default route there
+        # (it orders networks by name: qcm-lab-N sorts after floci-aws-vpc-*), which breaks the connections through
+        # the published API port while a VPC is created (CreateCluster: transport error, retry, 409).
+        gw_priority: 100
     ports:
-      - "4566:4566"
-      - "127.0.0.1:80:80"
+      # Loopback only: the API is unauthenticated and Floci holds the Docker socket. The tools container (host network)
+      # uses localhost; k3s nodes and EC2 containers reach floci:4566 on the Docker networks.
+      - "127.0.0.1:${QCM_LAB_AWS_PORT:?run task lab:up}:4566"
+      - "127.0.0.1:${QCM_LAB_ALB_PORT:?run task lab:up}:80"
     environment:
       FLOCI_STORAGE_MODE: "persistent"
       FLOCI_STORAGE_PERSISTENT_PATH: "/app/data"
       FLOCI_SERVICES_LAMBDA_DOCKER_HOST_OVERRIDE: "floci"
+      # URLs in responses carry the host port of this slot.
+      FLOCI_BASE_URL: "http://localhost:${QCM_LAB_AWS_PORT}"
+      # Host ports Floci publishes for k3s API servers and EC2 SSH: a range per slot, so two labs never pick the same.
+      FLOCI_SERVICES_EKS_API_SERVER_BASE_PORT: "${QCM_LAB_EKS_PORT_MIN:?run task lab:up}"
+      FLOCI_SERVICES_EKS_API_SERVER_MAX_PORT: "${QCM_LAB_EKS_PORT_MAX:?run task lab:up}"
+      FLOCI_SERVICES_EC2_SSH_PORT_RANGE_START: "${QCM_LAB_SSH_PORT_MIN:?run task lab:up}"
+      FLOCI_SERVICES_EC2_SSH_PORT_RANGE_END: "${QCM_LAB_SSH_PORT_MAX:?run task lab:up}"
+      # Security-group ports of EC2 instances (Nexus 8081...): Floci does not retry a host port another lab holds.
+      FLOCI_SERVICES_EC2_APP_PORT_RANGE_START: "${QCM_LAB_APP_PORT_MIN:?run task lab:up}"
+      FLOCI_SERVICES_EC2_APP_PORT_RANGE_END: "${QCM_LAB_APP_PORT_MAX:?run task lab:up}"
+      # Prefix of every container and volume Floci starts: floci-aws-sN-eks-<cluster>, floci-aws-sN-vpc-*, and the
+      # otherwise fixed floci-aws-ec2-volumes, floci-aws-ec2-volume-helper, floci-aws-ecr-registry(-data). Empty in
+      # slot 0, which keeps the slot-0 names.
+      FLOCI_DOCKER_RESOURCE_NAMESPACE: "${QCM_LAB_NAMESPACE?run task lab:up}"
     volumes:
       - "./floci-data:/app/data"
       - "/var/run/docker.sock:/var/run/docker.sock"
 
   ui:
-    image: floci/floci-ui:latest
+    image: floci/floci-ui:0.7.0@sha256:90dcaa588f9b3cd3cb5ccc98559286574391001e46735b7be4373364d51f7dfe
     networks:
       default:
-        ipv4_address: 172.18.0.3
+        ipv4_address: ${QCM_LAB_UI_IP:?run task lab:up}
     ports:
-      - "127.0.0.1:4500:4500"
+      - "127.0.0.1:${QCM_LAB_UI_PORT:?run task lab:up}:4500"
     environment:
       PORT: "4500"
       FLOCI_ENDPOINT: "http://floci:4566"
@@ -31,7 +56,30 @@ services:
       AWS_DEFAULT_REGION: "us-east-1"
       AWS_ACCESS_KEY_ID: "test"
       AWS_SECRET_ACCESS_KEY: "test"
+
+  # Docker operations for local/lab.sh in the tools container (local/lab/lab-api.sh). Host network, listening on
+  # 127.0.0.1 only: no container on a Docker network reaches it, and every request needs the token of `task lab:up`.
+  lab:
+    build: ./lab
+    image: qcm-floci-lab:local
+    network_mode: host
+    # Not root: the user of this checkout (owner of the 0600 token) plus the group of the Docker socket.
+    user: "${QCM_LAB_UID:?run task lab:up}:${QCM_LAB_GID:?run task lab:up}"
+    group_add: ["${QCM_LAB_DOCKER_GID:?run task lab:up}"]
+    environment:
+      LAB_PROJECT: ${QCM_LAB_PROJECT}
+      LAB_PORT: "${QCM_LAB_API_PORT:?run task lab:up}"
+      # The only network a node may be moved to; Floci's own VPC networks (floci-aws-[sN-]vpc-*) are accepted too.
+      LAB_NETWORK: ${QCM_LAB_NETWORK:?run task lab:up}
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "../.local-runtime/lab-token:/run/lab-token:ro"
+
+# External: the lease of the lab environment (local/lab-env.sh creates it with labels qcm.lab.slot and qcm.lab.owner).
+# Slot 0 is aws-local_default (subnet <QCM_LAB_NET_PREFIX>.0.0/16, default 172.18; a network from an older lab keeps
+# its subnet), slot N is qcm-lab-N (10.99.N.0/24). The k3s/EC2 containers that Floci attaches to it never block a
+# Compose change. local/lab.sh reads its name from QCM_LAB_NETWORK.
 networks:
   default:
     external: true
-    name: aws-local_default
+    name: ${QCM_LAB_NETWORK}

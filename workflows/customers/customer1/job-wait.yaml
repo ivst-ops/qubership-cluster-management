@@ -11,7 +11,7 @@ workflows:
 
       - name: access
         type: shell
-        command: pwsh -NoProfile -File ./local/scripts/Prepare-Cluster.ps1 -Stack customer1-aws-staging
+        command: task -d local prepare STACK=customer1-aws-staging
 
       - name: job
         command: terraform apply job-wait -input=false -auto-approve

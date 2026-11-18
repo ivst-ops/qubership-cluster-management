@@ -1,0 +1,65 @@
+# Pull-through image cache (zot, https://zotregistry.dev) shared by every lab of this Docker host: k3s nodes of all
+# slots and checkouts pull public images through it, so a new cluster no longer downloads istio, Argo CD and the rest
+# from the Internet. `task lab:up` starts it (REGISTRY_CACHE=false skips it); its images stay in the volume
+# qcm-registry-cache across labs, checkouts and restarts.
+# Not published on the host: during `prepare` the lab sidecar connects it to the node's Docker network and writes
+# containerd hosts.toml files that point the node at it (local/lab/lab-api.sh op=mirror). When the cache is down the
+# nodes fall back to the upstream registries.
+# Fixed names and an inline config: every checkout runs the same project. lab:up never recreates a running cache
+# (task lab:cache); after a change of this file recreate it with task lab:cache-recreate.
+name: qcm-registry-cache
+services:
+  zot:
+    image: ghcr.io/project-zot/zot:v2.1.23@sha256:9d3de83ac2099e6f4843045b4c9b65b7e8baf40f92d28f54906dee9d4d390fd7
+    container_name: qcm-registry-cache
+    # Set by task lab:cache; lab:up warns when the running cache was made from another definition.
+    labels:
+      qcm.cache.rev: ${QCM_CACHE_REV:-}
+    restart: unless-stopped
+    environment:
+      # Upstream downloads go through the proxy of the shell that runs task, when there is one.
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+    configs:
+      - source: zot
+        target: /etc/zot/config.json
+    volumes:
+      - cache:/var/lib/registry
+
+# Each upstream lives under its own path prefix (/docker.io/library/alpine...): containerd asks for
+# http://<cache>:5000/v2/<registry>/<repository> (override_path in hosts.toml) and zot fetches it on demand.
+# maxRetries/retryDelay: zot repeats a failed sync.
+# manifestCheckInterval: a cached tag is served from the cache without asking upstream for a day (the lab images have
+# fixed tags). syncTimeout bounds an upstream request that never answers, below the 5 minutes after which containerd
+# gives up on a pull: without it every later request of that tag waits behind the stuck one until zot restarts.
+# compat docker2s2: zot needs it to keep images in Docker manifest format.
+# The upstream list must match MIRRORS in local/lab/lab-api.sh.
+configs:
+  zot:
+    content: |
+      {
+        "distSpecVersion": "1.1.1",
+        "storage": {"rootDirectory": "/var/lib/registry", "dedupe": true, "gc": true},
+        "http": {"address": "0.0.0.0", "port": "5000", "compat": ["docker2s2"]},
+        "log": {"level": "info"},
+        "extensions": {
+          "sync": {
+            "enable": true,
+            "registries": [
+              {"urls": ["https://registry-1.docker.io"], "onDemand": true, "tlsVerify": true, "maxRetries": 3, "retryDelay": "5s", "syncTimeout": "4m", "manifestCheckInterval": "24h", "content": [{"prefix": "**", "destination": "/docker.io"}]},
+              {"urls": ["https://quay.io"], "onDemand": true, "tlsVerify": true, "maxRetries": 3, "retryDelay": "5s", "syncTimeout": "4m", "manifestCheckInterval": "24h", "content": [{"prefix": "**", "destination": "/quay.io"}]},
+              {"urls": ["https://ghcr.io"], "onDemand": true, "tlsVerify": true, "maxRetries": 3, "retryDelay": "5s", "syncTimeout": "4m", "manifestCheckInterval": "24h", "content": [{"prefix": "**", "destination": "/ghcr.io"}]},
+              {"urls": ["https://registry.k8s.io"], "onDemand": true, "tlsVerify": true, "maxRetries": 3, "retryDelay": "5s", "syncTimeout": "4m", "manifestCheckInterval": "24h", "content": [{"prefix": "**", "destination": "/registry.k8s.io"}]},
+              {"urls": ["https://registry.istio.io"], "onDemand": true, "tlsVerify": true, "maxRetries": 3, "retryDelay": "5s", "syncTimeout": "4m", "manifestCheckInterval": "24h", "content": [{"prefix": "**", "destination": "/registry.istio.io"}]},
+              {"urls": ["https://public.ecr.aws"], "onDemand": true, "tlsVerify": true, "maxRetries": 3, "retryDelay": "5s", "syncTimeout": "4m", "manifestCheckInterval": "24h", "content": [{"prefix": "**", "destination": "/public.ecr.aws"}]},
+              {"urls": ["https://mcr.microsoft.com"], "onDemand": true, "tlsVerify": true, "maxRetries": 3, "retryDelay": "5s", "syncTimeout": "4m", "manifestCheckInterval": "24h", "content": [{"prefix": "**", "destination": "/mcr.microsoft.com"}]},
+              {"urls": ["https://gcr.io"], "onDemand": true, "tlsVerify": true, "maxRetries": 3, "retryDelay": "5s", "syncTimeout": "4m", "manifestCheckInterval": "24h", "content": [{"prefix": "**", "destination": "/gcr.io"}]}
+            ]
+          }
+        }
+      }
+
+volumes:
+  cache:
+    name: qcm-registry-cache

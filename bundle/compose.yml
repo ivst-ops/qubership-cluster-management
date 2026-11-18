@@ -1,0 +1,12 @@
+# Node packages of the bundle: `task bundle:apt` on the host, after bundle/build.sh wrote apt.env from the manifest.
+# BUNDLE_APT_DIR overrides the output directory (default: the apt/ part of .local-runtime/bundle).
+name: qcm-bundle
+services:
+  apt:
+    image: ${OS_IMAGE:?run bundle/build.sh first}
+    environment:
+      OS_PACKAGES: ${OS_PACKAGES:?run bundle/build.sh first}
+    volumes:
+      - ${BUNDLE_APT_DIR:-../.local-runtime/bundle/apt}:/debs
+      - ./apt.sh:/apt.sh:ro
+    command: ["bash", "/apt.sh"]

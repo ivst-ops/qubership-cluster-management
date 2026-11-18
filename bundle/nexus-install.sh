@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs as root on the Nexus VM (local/lab.sh nexus-install pipes it over SSH); the archive is already in /tmp.
+# Runs as root on the Nexus VM (task -d local nexus:install pipes it over SSH); the archive is already in /tmp.
 # No Internet needed: the Linux archive includes its Java runtime.
 set -euo pipefail
 archive=/tmp/nexus.tar.gz work=/opt/sonatype-work/nexus3

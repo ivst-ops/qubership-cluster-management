@@ -1,7 +1,8 @@
 data "external" "nexus_endpoint" {
   count = var.nexus_wait_for_ready && var.local_endpoint != null && var.nexus_readiness_url == null ? 1 : 0
 
-  program = ["pwsh", "-NoProfile", "-File", "${path.module}/../../../../local/scripts/Get-NexusTerraformEndpoint.ps1"]
+  # JSON {"instance_id"} on stdin, {"url"} on stdout; the lab sidecar looks up the published port.
+  program = ["bash", "${path.module}/../../../../local/lab.sh", "nexus-endpoint-json"]
   query = {
     instance_id = aws_instance.nexus.id
   }
@@ -31,8 +32,9 @@ data "http" "nexus_ready" {
   url                = local.nexus_readiness_endpoint
   request_timeout_ms = 5000
 
+  # Up to 20 minutes: the user data downloads the 500 MB Nexus archive first, about 9 minutes at 1 MB/s.
   retry {
-    attempts     = 60
+    attempts     = 120
     min_delay_ms = 10000
     max_delay_ms = 10000
   }
