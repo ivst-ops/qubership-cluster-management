@@ -8,14 +8,12 @@ jump host, and Helmfile uses the same Nexus for charts. Secrets live in the repo
 
 Managed clusters (the EKS, AKS, and GKE stacks) are unchanged and still pull charts and images from the Internet.
 
-See [stack dependencies](architecture.md#kubemarine-stack-dependencies) for the catalog map.
-
 ## How it works
 
 ```text
  operator environment (tools image)                  cloud: private network, no Internet route
  ──────────────────────────────────                  ─────────────────────────────────────────
- bundle/build.sh ──► .local-runtime/bundle
+ task bundle ─────► .local-runtime/bundle
                                                      ┌─ jump host (public IP, SSH from operator CIDR)
  atmos / helmfile / kubemarine ═══ SSH + SOCKS ═════►│
                                                      ├─► Nexus VM   :8081 raw "bundle" (files, apt, charts)
@@ -27,23 +25,24 @@ See [stack dependencies](architecture.md#kubemarine-stack-dependencies) for the 
 
 | Step | What happens | Command inside `deploy-vm` |
 |---|---|---|
-| `network` | VPC or VNet with a public subnet for the jump host and private subnets for everything else | `terraform apply network` |
+| `network` | VPC or VNet with a public subnet for the jump host and private subnets for everything else | `atmos terraform apply network` |
 | `open-access` | Jump host, then a SOCKS tunnel through it on `127.0.0.1:1080` | `workflow open-access` |
-| `nodes` | Cluster node VMs | `terraform apply vms` |
+| `nodes` | Cluster node VMs | `atmos terraform apply vms` |
 | `nexus` | Nexus VM, Nexus installed from the bundle, bundle uploaded | `workflow deploy-nexus` |
-| `kubemarine` | `cluster.yaml` generated from the VM outputs; `kubemarine install` runs in the operator environment through the jump host | `terraform apply kubemarine` |
-| `access` | kubeconfig taken from the first control-plane node; the API is reached through the tunnel | `lab.sh prepare-vms` |
+| `kubemarine` | `cluster.yaml` generated from the VM outputs; `kubemarine install` runs in the operator environment through the jump host | `atmos terraform apply kubemarine` |
+| `access` | kubeconfig taken from the first control-plane node; the API is reached through the tunnel | `task -d local prepare-vms` |
 | `apps` | Helmfile installs Istio, Argo CD, Kiali, MinIO, and Headlamp; charts come from Nexus, images through containerd mirrors | `workflow deploy-apps` |
 | `close-access` | Tunnel stopped, jump host destroyed | `workflow close-access` |
 
 The VM groups are applied one after another on purpose. They share one module directory and its selected
-Terraform workspace, so parallel applies would run against each other's state.
+OpenTofu workspace, so parallel applies would run against each other's state. `atmos terraform` runs OpenTofu:
+[atmos.yaml](../atmos.yaml) sets `components.terraform.command: tofu`.
 
 ### Components
 
 The component names are the same in every cloud, so a stack switches cloud by switching catalogs.
 
-| Component | Terraform module | Purpose |
+| Component | OpenTofu module | Purpose |
 |---|---|---|
 | `network` | `<cloud>/network` | Subnets with `public: false` get no Internet route (AWS: no IGW route; Azure: no default outbound access; GCP: VMs without an external IP) |
 | `jump-host` | `<cloud>/vms` | One public VM, SSH only from `allowed_cidrs` |
@@ -55,13 +54,8 @@ The component names are the same in every cloud, so a stack switches cloud by sw
 The module output `vms` (name, roles, address, internal address) is what the `kubemarine` component and
 `local/lab.sh` read. Another provider, such as OpenStack or vSphere, needs only a module with the same inputs and output.
 
-The Kubemarine catalogs are in [stacks/catalog/kubemarine/](../stacks/catalog/kubemarine/):
-
-| Catalog | What it supplies |
-|---|---|
-| [aws-vms.yaml](../stacks/catalog/kubemarine/aws-vms.yaml), [azure-vms.yaml](../stacks/catalog/kubemarine/azure-vms.yaml), [gcp-vms.yaml](../stacks/catalog/kubemarine/gcp-vms.yaml) | The `jump-host`, `nexus`, and `vms` groups with sizes and ports, inheriting the abstract `vm-group` |
-| [install.yaml](../stacks/catalog/kubemarine/install.yaml) | Wires Kubemarine to the VM outputs and Nexus; Calico with `crossSubnet: false` |
-| [offline.yaml](../stacks/catalog/kubemarine/offline.yaml) | Nexus chart repository URL, SOCKS proxy for Helmfile, chart versions from the bundle manifest |
+The Kubemarine catalogs are in [stacks/catalog/kubemarine/](../stacks/catalog/kubemarine/); what each supplies:
+[stack dependencies](architecture.md#kubemarine-stack-dependencies).
 
 Stack templates exist for AWS and Azure:
 
@@ -74,25 +68,42 @@ GCP has only the catalog so far. Workflow files are per stack because Atmos does
 
 ## 1. Prepare the operator environment
 
-Run the Bash commands from the repository root in Linux or WSL 2. Use the tools pinned in the
-[Dockerfile](../Dockerfile), or build and enter the tools container from a Bash shell with access to the
-Docker engine. The image has Atmos, Terraform, Helmfile, kubectl, Kubemarine, sops, age, gpg, crane, and yq.
-The example uses Linux containers and a Docker socket at `/var/run/docker.sock`.
+Run the commands from the repository root in a Linux shell (a Linux VM or WSL 2) with Docker and Docker Compose
+([versions](getting-started.md#1-docker-and-devbox), `task doctor`).
+`devbox shell` ([Devbox](https://www.jetify.com/devbox), [devbox.json](../devbox.json)) brings the developer tools,
+[Task](https://taskfile.dev) among them ([Taskfile.yml](../Taskfile.yml), `task --list`). The infrastructure tools
+run in the tools container ([Dockerfile](../Dockerfile), [compose.yml](../compose.yml)) with the checkout mounted
+at the same path and the host network. The image has Atmos, OpenTofu, Task, Helm with helm-diff, Helmfile, kubectl,
+Kubemarine, the AWS CLI, sops, age, gpg, crane, and yq: production tools only.
+
+The AWS CLI keeps 17 service models; how to add a service, a Helm plugin or a tool: [Extending the tools image](local-development.md#extending-the-tools-image).
+Not in the image: unzip, binutils, python3-venv, gpgsm/dirmngr, the Docker CLI and Compose, Terraform; a derived image
+installs what it needs.
+The Go tools are not packed: a packed binary unpacks itself into private memory at every start, which costs about
+2 s and 300 MB per atmos call. Helm plugins live in
+`HELM_PLUGINS=/usr/local/share/helm/plugins`, outside HOME: install more there in a derived image.
+The image sets `ATMOS_VERSION_CHECK_ENABLED=false`: the release check costs ~2.5 s per atmos call, and the version is
+pinned in the Dockerfile. Set it to `true` to see the notice.
+To keep the image small, perl is replaced by empty placeholder packages; before installing a package that needs perl
+into the image or a derived one, run `apt-get install --reinstall perl liberror-perl git-man`.
 
 ```bash
-docker build --platform linux/amd64 -t qcm-tools .
-docker run --rm -it --platform linux/amd64 \
-  --mount "type=bind,source=$PWD,target=/workspace" \
-  --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
-  qcm-tools
+devbox shell
+task tools:shell   # builds the image for this machine's platform when the Dockerfile changed, then a shell in it
 ```
 
-The checkout mount keeps Terraform state, the bundle, and kubeconfigs across container runs.
-Run commands that share a tunnel in the same environment. A tunnel started in the container exits
-when that container stops. Use a checkout path without spaces for the SSH proxy command.
+Run the rest of this guide in that shell: `task -d local …`, `atmos`, `sops`, `age-keygen` and `kubectl` exist only
+in the tools image. From `devbox shell` on the host, run an operator task as `task ops -- <task> …` instead.
+Every task that uses the tools starts the container the same way, so a Dockerfile change is picked up on the next task.
+`task image:release` builds the linux/amd64 image as CI does (`qcm-tools:local`); pass it as
+`task tools:shell IMAGE=qcm-tools:local` to use it instead of the native build.
 
-To open the Nexus UI or port-forwarded applications from a browser on the host, add `--network host` to `docker run`.
-On Docker Desktop this also needs Settings → Resources → Network → **Enable host networking**.
+The checkout mount keeps the state, the bundle, and kubeconfigs across container runs.
+Run commands that share a tunnel in the same tools container. A tunnel started there exits when the container is
+recreated (`task tools:down`, or a new image). Use a checkout path without spaces for the SSH proxy command.
+
+On Docker Desktop the host network needs Settings → Resources → Network → **Enable host networking**; with it,
+the Nexus UI and port-forwarded applications open from a browser on the host.
 
 ## 2. Build the bundle
 
@@ -100,15 +111,17 @@ On Docker Desktop this also needs Settings → Resources → Network → **Enabl
 original sources: Nexus itself, node packages, Kubemarine binaries and images, Helm charts, and application images.
 [offline.yaml](../stacks/catalog/kubemarine/offline.yaml) reads chart versions from it, so a version changes in one place.
 
-Run the build where the Internet is reachable:
+Run the build where the Internet is reachable. `task bundle` downloads everything in the tools container
+([build.sh](../bundle/build.sh)), then resolves the node packages in a clean container of the node OS
+([apt.sh](../bundle/apt.sh)); re-runs skip what is already there:
 
 ```bash
-bash ./bundle/build.sh   # → .local-runtime/bundle, about 2.4 GB and 10 minutes
+task bundle   # → .local-runtime/bundle, about 2.4 GB and 10 minutes
 ```
 
 | Bundle part | Nexus location | Used by |
 |---|---|---|
-| `nexus.tar.gz` | None; copied to the Nexus VM | `lab.sh nexus-install` |
+| `nexus.tar.gz` | None; copied to the Nexus VM | `task -d local nexus:install` |
 | `files/…` (kubeadm, kubelet, kubectl, calicoctl, crictl, etcd) | `bundle` raw repository, `files/` | Kubemarine `registry.thirdparties` |
 | `apt/` (packages and dependencies, flat repository with `Packages`) | `bundle` raw repository, `apt/` | Kubemarine `services.packages` |
 | `charts/` with `index.yaml` | `bundle` raw repository, `charts/` (a Helm repository) | Helmfile |
@@ -119,7 +132,7 @@ them with its mirror name. Application images keep their registry (`quay.io/argo
 maps each registry listed in `app_images` to that prefix in Nexus, so charts and values stay unchanged.
 
 The build skips artifacts that already exist. Use a fresh bundle directory when changing manifest versions.
-To update a version, edit the manifest, rebuild, and rerun `nexus-load` (see [section 6](#6-work-with-the-cluster-later)).
+To update a version, edit the manifest, rebuild, and rerun `task -d local nexus:load` (see [section 6](#6-work-with-the-cluster-later)).
 The `kubemarine` section of the manifest comes from the Kubemarine package
 (`kubemarine/resources/configurations/compatibility/internal/*.yaml`); regenerate it when the Kubemarine or Kubernetes
 version changes. Application images include those charts pull at run time (Istio sidecar, Kiali server). After adding
@@ -147,12 +160,12 @@ The release notes name the commit the bundle was built from. Check out that comm
 ## 3. Configure secrets
 
 Each VM stack has `secrets/<stack>.yaml`, encrypted with [SOPS](https://getsops.io). Its keys are environment variable
-names, so secrets reach the tools as environment variables and are written neither to tfvars nor to Terraform state.
+names, so secrets reach the tools as environment variables and are written neither to tfvars nor to OpenTofu state.
 
 | Key | Used by |
 |---|---|
 | `TF_VAR_ssh_public_key` | `<cloud>/vms`: key pair or authorized key on every VM |
-| `TF_VAR_ssh_private_key` | `kubemarine` and `lab.sh`: SSH through the jump host |
+| `TF_VAR_ssh_private_key` | `kubemarine` and the SSH tasks of `local/Taskfile.yml`: SSH through the jump host |
 | `NEXUS_ADMIN_PASSWORD` | `bundle/load.sh`: replaces the initial Nexus password |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | AWS provider, when credentials are not taken from the standard chain |
 | `ARM_SUBSCRIPTION_ID`, `ARM_TENANT_ID`, `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET` | Azure provider (service principal) |
@@ -176,14 +189,14 @@ The decrypting key source is chosen at run time, without code changes:
 
 | Source | How | Typical use |
 |---|---|---|
-| Local file | `SOPS_AGE_KEY_FILE=<path>`; `lab.sh` uses `local/age.key` when nothing else is set | Operator environment |
+| Local file | `SOPS_AGE_KEY_FILE=<path>`; `local/Taskfile.yml` uses `local/age.key` when nothing else is set | Operator environment |
 | Variable | `SOPS_AGE_KEY=AGE-SECRET-KEY-…` | CI secret |
 | Cloud secret manager | `SOPS_AGE_KEY_CMD='aws secretsmanager get-secret-value --secret-id sops-age --query SecretString --output text'` (or `az keyvault secret show … -o tsv`) | Cloud runners |
 | Cloud KMS | Add `kms` or `azure_keyvault` to `.sops.yaml`; the runner's cloud identity decrypts | No key material at all |
 | PGP | Add the fingerprint to `pgp:` in `.sops.yaml`; sops decrypts with the secret key in the gpg keyring | Operators who already have a PGP key |
 
-With PGP, the tools container has its own keyring: import your secret key once per container with
-`gpg --import <secret-key.asc>`. If the key has a passphrase, run `export GPG_TTY=$(tty)` first. In CI, use a key
+With PGP, the tools container has its own keyring in `.local-runtime/home/.gnupg`, kept across recreated
+containers: import your secret key once per checkout with `gpg --import <secret-key.asc>`. If the key has a passphrase, run `export GPG_TTY=$(tty)` first. In CI, use a key
 without a passphrase and import it from a secret: `gpg --batch --import <<<"$SOPS_PGP_KEY"`.
 
 ### Create the stack secrets
@@ -199,8 +212,8 @@ export SOPS_AGE_KEY_FILE="$PWD/local/age.key"
 ```
 
 ```bash
-bash ./local/lab.sh secrets-init "$stack"   # one time: SSH key pair and Nexus password, encrypted
-sops "secrets/$stack.yaml"                  # add the cloud credentials
+task -d local secrets:init STACK="$stack"   # one time: SSH key pair and Nexus password, encrypted
+sops "secrets/$stack.yaml"                    # add the cloud credentials
 ```
 
 Or set single values without an editor:
@@ -210,7 +223,7 @@ sops set "secrets/$stack.yaml" '["ARM_CLIENT_SECRET"]' '"<password>"'
 ```
 
 Every value in the file shows as `ENC[...]`, so it is safe to commit. Commands get the values through
-`bash ./local/lab.sh with-secrets "$stack" <command>`. You can also use credentials from the provider's standard
+`task -d local secrets:exec STACK="$stack" -- <command>`. You can also use credentials from the provider's standard
 authentication chain inside the operator environment.
 
 ## 4. Configure the stack
@@ -225,11 +238,12 @@ Only these addresses can reach the jump host. Keep the public jump subnet and th
 Node sizes and counts are in the cloud catalog and can be overridden in the stack.
 
 - **AWS** — replace `components.terraform.vm-group.vars.ami_id` with a Canonical Ubuntu 24.04 amd64 AMI in the
-  selected region. Kubemarine 0.55 needs containerd 2.2, which Ubuntu 24.04 ships. The AWS defaults inherit
-  `HTTPS_PROXY=http://127.0.0.1:12334` from the Floci lab. Set `env.HTTPS_PROXY` in this VM manifest to a proxy
-  reachable from the operator environment, or set it to `""` for direct access.
+  selected region. Kubemarine 0.55 needs containerd 2.2, which Ubuntu 24.04 ships.
 - **Azure** — the VM module already selects an Ubuntu 24.04 amd64 image. The region is `northeurope` from
   `customer1/azure/_defaults.yaml`; to use another, set `vars.region` in the stack. Review the prerequisites below.
+
+The Kubemarine stacks point Helmfile at the SOCKS tunnel. A proxy the operator environment needs comes from the shell
+([proxies](getting-started.md#4-network-access-proxies-and-providers)).
 
 What the default catalogs create:
 
@@ -261,7 +275,7 @@ Run these in Azure Cloud Shell (Bash) or with the Azure CLI.
    az provider register --namespace Microsoft.Network --wait
    ```
 
-3. **Service principal for Terraform.** Copy `appId`, `password`, and `tenant` from the output, together with the
+3. **Service principal for OpenTofu.** Copy `appId`, `password`, and `tenant` from the output, together with the
    subscription ID, into the `ARM_*` secrets. The password is shown only once.
 
    ```bash
@@ -274,7 +288,7 @@ Run these in Azure Cloud Shell (Bash) or with the Azure CLI.
 ```bash
 atmos validate stacks
 atmos workflow deploy-vm -f "$workflow" --dry-run
-bash ./local/lab.sh with-secrets "$stack" atmos terraform plan network -s "$stack"   # creates nothing
+task -d local secrets:exec STACK="$stack" -- atmos terraform plan network -s "$stack"   # creates nothing
 ```
 
 Validation prints `All stacks validated successfully`. Dry-run lists the top-level steps. The plan checks cloud access.
@@ -282,7 +296,7 @@ Validation prints `All stacks validated successfully`. Dry-run lists the top-lev
 ## 5. Deploy
 
 ```bash
-bash ./local/lab.sh run "$stack" atmos workflow deploy-vm -f "$workflow"
+task -d local secrets:exec STACK="$stack" -- atmos workflow deploy-vm -f "$workflow"
 ```
 
 Expected durations; most of the time is Kubemarine and the bundle upload:
@@ -302,179 +316,26 @@ These are estimates, not measurements. Kubemarine output streams into the `kubem
 the final inventory stays in `.local-runtime/kubemarine/$stack/dump`.
 
 The workflow ends with `close-access`: the jump host is destroyed, so nothing in the environment accepts connections
-from outside. If a step fails, fix the cause and run the same command again. Applied Terraform components change
+from outside. If a step fails, fix the cause and run the same command again. Applied OpenTofu components change
 nothing, Kubemarine does not reinstall, and the bundle upload skips what Nexus already has.
-
-### Run logs
-
-`lab.sh run` works like `with-secrets` (it loads `secrets/$stack.yaml` when it exists) and also keeps the logs of the
-run. After the command finishes, with success, failure, or Ctrl-C, it collects everything into one archive and keeps
-the command's exit code:
-
-```text
-.local-runtime/logs/<stack>-<UTC time>-<ok|failed>.tar.gz
-└── <stack>-<UTC time>-<ok|failed>/
-    ├── run/          summary.txt (stack, command, exit code, times, commit), command.txt, console.log,
-    │                 collect.log (what was collected and what was not reachable)
-    ├── config/       stack.yaml: the resolved stack configuration
-    ├── kubemarine/   cluster.yaml and the Kubemarine dump (debug.log, inventories); key files are left out
-    ├── kubernetes/   overview.txt and dump/: cluster state, events, and container logs per namespace
-    ├── nexus/        nexus.log: service status and the Nexus log
-    └── nodes/        <node>.log: containerd and kubelet journal of each node
-```
-
-Each part is optional. `kubernetes/`, `nexus/`, and `nodes/` need the jump host and the tunnel, so they are collected
-when a run fails before `close-access`, or for runs made while access is open. After a successful `deploy-vm` the
-jump host is gone, and the archive holds the console log, configuration, and Kubemarine files.
-
-In CI, the deploy job attaches the archives as the `logs-<stack>-attempt<N>` artifact.
-
-### Upload run logs to cloud storage
-
-Uploading is optional. When `LOGS_UPLOAD_URL` is set, every `lab.sh run` uploads its archive after collecting it.
-The storage is chosen by the form of the URL:
-
-| Storage | `LOGS_UPLOAD_URL` | Credentials |
-|---|---|---|
-| AWS S3 | `s3://<bucket>/<prefix>` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN`) with `s3:PutObject` on the prefix |
-| Azure Blob Storage | `https://<account>.blob.core.windows.net/<container>/<prefix>?<SAS>` | The SAS token in the URL, with create and write rights on the container |
-| Google Cloud Storage | `gs://<bucket>/<prefix>` | `LOGS_GCS_HMAC_ACCESS_ID`, `LOGS_GCS_HMAC_SECRET`: an HMAC key of a service account with `roles/storage.objectCreator` |
-
-The prefix is optional; the archive is stored as `<prefix>/<stack>-<UTC time>-<ok|failed>.tar.gz`. A failed upload is
-reported, the run keeps the command's exit code, and the archive stays local.
-
-The archives contain internal addresses and the cluster configuration. Use a private bucket or container, and give the
-uploading identity write rights only. The prepared storage can be shared by many stacks: use a prefix per stack.
-
-The variables are secrets, so store them in `secrets/$stack.yaml`, never in the stack manifest:
-
-```bash
-sops set "secrets/$stack.yaml" '["LOGS_UPLOAD_URL"]' '"<URL>"'
-```
-
-Check the upload with an empty run; it creates a small archive and uploads it:
-
-```bash
-bash ./local/lab.sh run "$stack" true   # ends with "Logs uploaded: ..."
-```
-
-The storage commands below need administrator rights in the cloud account and run with the cloud's own CLI
-(AWS CloudShell, Azure Cloud Shell, and Google Cloud Shell have them). Keep the storage outside the stack's
-resource group or project resources, so `destroy-vm` does not delete the logs. Each example ends with a lifecycle rule
-that deletes archives after 30 days; change or drop it as needed.
-
-#### AWS S3
-
-The upload uses the AWS credentials from `secrets/$stack.yaml`. For an AWS stack these are the deployment credentials,
-so add `s3:PutObject` to that identity. For an Azure stack, create a separate IAM user that can only upload, and add its
-`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to the secrets.
-
-```bash
-BUCKET=qcm-run-logs-$(aws sts get-caller-identity --query Account --output text)
-REGION=us-east-1
-aws s3 mb "s3://$BUCKET" --region "$REGION"   # new buckets block public access by default
-
-cat > logs-upload-policy.json <<EOF
-{"Version": "2012-10-17", "Statement": [{"Effect": "Allow",
-  "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
-  "Resource": "arn:aws:s3:::$BUCKET/$stack/*"}]}
-EOF
-# The IAM user whose keys are in secrets/$stack.yaml; for a role, use put-role-policy --role-name.
-aws iam put-user-policy --user-name <IAM user> --policy-name qcm-logs-upload \
-  --policy-document file://logs-upload-policy.json
-
-aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-configuration \
-  '{"Rules":[{"ID":"expire-run-logs","Status":"Enabled","Filter":{"Prefix":""},"Expiration":{"Days":30}}]}'
-
-echo "LOGS_UPLOAD_URL=s3://$BUCKET/$stack"
-```
-
-Also add `AWS_DEFAULT_REGION` with the bucket region to the secrets when the stack secrets have no region.
-S3-compatible storage, such as MinIO, works with `s3://` and `AWS_ENDPOINT_URL_S3=<endpoint>` in the secrets.
-
-#### Azure Blob Storage
-
-The URL carries its own credentials: a container SAS token that can only create and write blobs. The SAS refers to a
-stored access policy, so access can be revoked or extended without changing the URL or the account keys.
-
-```bash
-RG=qcm-run-logs-rg
-LOCATION=northeurope
-ACCOUNT=qcmrunlogs$RANDOM   # 3–24 lowercase letters and digits, unique in Azure
-CONTAINER=run-logs
-
-az group create -n "$RG" -l "$LOCATION"
-az storage account create -n "$ACCOUNT" -g "$RG" -l "$LOCATION" \
-  --sku Standard_LRS --kind StorageV2 --min-tls-version TLS1_2 --allow-blob-public-access false
-az storage container create --account-name "$ACCOUNT" -n "$CONTAINER" --auth-mode key
-
-EXPIRY=$(date -u -d '+180 days' +%Y-%m-%dT%H:%MZ)
-az storage container policy create --account-name "$ACCOUNT" -c "$CONTAINER" \
-  -n logs-upload --permissions cw --expiry "$EXPIRY" --auth-mode key
-SAS=$(az storage container generate-sas --account-name "$ACCOUNT" -n "$CONTAINER" \
-  --policy-name logs-upload --https-only --auth-mode key -o tsv)
-
-az storage account management-policy create --account-name "$ACCOUNT" -g "$RG" --policy \
-  '{"rules":[{"enabled":true,"name":"expire-run-logs","type":"Lifecycle","definition":{"actions":{"baseBlob":{"delete":{"daysAfterModificationGreaterThan":30}}},"filters":{"blobTypes":["blockBlob"],"prefixMatch":["run-logs/"]}}}]}'
-
-echo "LOGS_UPLOAD_URL=https://$ACCOUNT.blob.core.windows.net/$CONTAINER/$stack?$SAS"
-```
-
-When the policy expires, uploads fail with `403`. Extend it with
-`az storage container policy update --account-name "$ACCOUNT" -c "$CONTAINER" -n logs-upload --expiry <date> --auth-mode key`;
-the URL stays the same. Revoke access with `az storage container policy delete` and the same names.
-If the storage account firewall is enabled, allow the operator or CI runner addresses.
-
-#### Google Cloud Storage
-
-The upload goes through the S3-compatible API of Cloud Storage with an HMAC key of a dedicated service account. The
-service account can only create objects in the bucket: it cannot read, list, or overwrite the logs.
-
-```bash
-PROJECT=$(gcloud config get-value project)
-BUCKET=qcm-run-logs-$PROJECT
-SA=qcm-logs-upload@$PROJECT.iam.gserviceaccount.com
-
-gcloud storage buckets create "gs://$BUCKET" --location=europe-north1 \
-  --uniform-bucket-level-access --public-access-prevention
-gcloud iam service-accounts create qcm-logs-upload --display-name="QCM run logs upload"
-gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
-  --member="serviceAccount:$SA" --role=roles/storage.objectCreator
-gcloud storage hmac create "$SA"   # prints accessId and secret; the secret is shown only once
-
-echo '{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}' > lifecycle.json
-gcloud storage buckets update "gs://$BUCKET" --lifecycle-file=lifecycle.json
-
-echo "LOGS_UPLOAD_URL=gs://$BUCKET/$stack"
-```
-
-Store all three values:
-
-```bash
-sops set "secrets/$stack.yaml" '["LOGS_UPLOAD_URL"]' '"gs://<bucket>/<stack>"'
-sops set "secrets/$stack.yaml" '["LOGS_GCS_HMAC_ACCESS_ID"]' '"<accessId>"'
-sops set "secrets/$stack.yaml" '["LOGS_GCS_HMAC_SECRET"]' '"<secret>"'
-```
-
-Revoke the key with `gcloud storage hmac update <accessId> --deactivate`, then `gcloud storage hmac delete <accessId>`.
 
 ## 6. Work with the cluster later
 
 Open access, check the cluster, and close access in the same operator environment:
 
 ```bash
-bash ./local/lab.sh with-secrets "$stack" atmos workflow open-access -f "$workflow"
+task -d local secrets:exec STACK="$stack" -- atmos workflow open-access -f "$workflow"
 export KUBECONFIG="$PWD/.local-runtime/kubeconfig-$stack.yaml"   # proxy-url to the tunnel is in the kubeconfig
 kubectl get nodes -o wide   # 5 nodes Ready, internal IPs only
 kubectl get pods -A         # all Running or Completed
-bash ./local/lab.sh with-secrets "$stack" atmos workflow close-access -f "$workflow"
+task -d local secrets:exec STACK="$stack" -- atmos workflow close-access -f "$workflow"
 ```
 
 Check the isolation while access is open: a node cannot reach the Internet but reaches Nexus.
 
 ```bash
 node=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}')
-bash ./local/lab.sh with-secrets "$stack" bash ./local/lab.sh ssh "$stack" "$node" \
+task -d local secrets:exec STACK="$stack" -- task -d local ssh STACK="$stack" HOST="$node" -- \
   'curl -sS -m 5 -o /dev/null https://archive.ubuntu.com && echo "INTERNET REACHABLE" || echo "isolated: OK"'
 ```
 
@@ -482,39 +343,40 @@ Other tasks while access is open:
 
 | Task | Command |
 |---|---|
-| Reapply the apps | `bash ./local/lab.sh run "$stack" atmos workflow deploy-apps -f "$workflow"` |
-| Reload Nexus after a bundle change | `bash ./local/lab.sh with-secrets "$stack" bash ./local/lab.sh nexus-load "$stack"` |
-| Shell on a private VM | `bash ./local/lab.sh with-secrets "$stack" bash ./local/lab.sh ssh "$stack" <private address>` |
+| Reapply the apps | `task -d local secrets:exec STACK="$stack" -- atmos workflow deploy-apps -f "$workflow"` |
+| Reload Nexus after a bundle change | `task -d local secrets:exec STACK="$stack" -- task -d local nexus:load STACK="$stack"` |
+| Shell on a private VM | `task -d local secrets:exec STACK="$stack" -- task -d local ssh STACK="$stack" HOST=<private address>` |
+| Start / stop the SOCKS tunnel by hand | `task -d local secrets:exec STACK="$stack" -- task -d local tunnel STACK="$stack"` / `task -d local tunnel:stop STACK="$stack"` |
 | Nexus private address | `atmos terraform output nexus -s "$stack"` (`internal_address`) |
 
-To open an application, port-forward from the container and open `http://localhost:<port>` on the host:
+To open an application, port-forward in the tools container and open `http://localhost:<port>` on the host
+(the container uses the host network, so its `127.0.0.1` is the host's):
 
 ```bash
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
-kubectl -n argocd port-forward --address 0.0.0.0 svc/argocd-server 8080:80   # user admin
+kubectl -n argocd port-forward svc/argocd-server 8080:80   # user admin
 ```
 
 Use the same pattern for Headlamp (`-n headlamp svc/headlamp`), the MinIO console (`-n storage svc/minio-console`),
-and Kiali (`-n istio-system svc/kiali 20001`). `--address 0.0.0.0` is needed because the container's `127.0.0.1` is
-not the host's. For the Nexus UI, set the browser's SOCKS proxy to `127.0.0.1:1080` and open
-`http://<Nexus private address>:8081` as `admin` with `NEXUS_ADMIN_PASSWORD` from `sops -d "secrets/$stack.yaml"`.
-Both need the container started with `--network host` (see [section 1](#1-prepare-the-operator-environment)).
+and Kiali (`-n istio-system svc/kiali 20001`). For the Nexus UI, set the browser's SOCKS proxy to `127.0.0.1:1080`
+and open `http://<Nexus private address>:8081` as `admin` with `NEXUS_ADMIN_PASSWORD` from
+`sops -d "secrets/$stack.yaml"`.
 
 The `kubemarine` component installs once per environment. Later inventory changes go through Kubemarine procedures
 (`kubemarine add_node`, `upgrade`, and others) with `.local-runtime/kubemarine/$stack/cluster.yaml`.
 A clean reinstall is:
 
 ```bash
-bash ./local/lab.sh with-secrets "$stack" atmos terraform apply kubemarine -s "$stack" -replace=terraform_data.install
+task -d local secrets:exec STACK="$stack" -- atmos terraform apply kubemarine -s "$stack" -replace=terraform_data.install
 ```
 
 ## 7. Destroy
 
 ```bash
-bash ./local/lab.sh run "$stack" atmos workflow destroy-vm -f "$workflow"
+task -d local secrets:exec STACK="$stack" -- atmos workflow destroy-vm -f "$workflow"
 ```
 
-Destroy stops the tunnel and removes the installer state, VMs, Nexus, jump host, and network. Terraform state is local
+Destroy stops the tunnel and removes the installer state, VMs, Nexus, jump host, and network. OpenTofu state is local
 (`components/terraform/*/terraform.tfstate.d/`): keep the checkout until destroy finishes. On Azure, also check that
 the resource group is gone (`az group list -o table`) and delete the service principal (`az ad sp delete --id <appId>`).
 
@@ -522,16 +384,16 @@ the resource group is gone (`az group list -o table`) and delete the service pri
 
 | Symptom | Check |
 |---|---|
-| Any failed run | The archive from `lab.sh run`: start with `run/console.log`, then `kubemarine/` or `kubernetes/dump/`. |
-| `No SSH key` from `lab.sh` | The command was not run under `with-secrets` or `run`. |
+| `No SSH key` from `lab.sh` | The task was not run under `task -d local secrets:exec`. |
+| `sops: command not found`, `atmos: command not found` | The command ran on the host: run it in `task tools:shell`, or as `task ops -- <task>`. |
 | SOPS: `no identity matched` or cannot decrypt | Check `SOPS_AGE_KEY_FILE` (or another key source) and the recipients in the encrypted file. |
-| AWS API or registry connection refused | Check the inherited HTTPS proxy from inside the operator shell. |
+| AWS API or registry connection refused | Check `HTTPS_PROXY` / `NO_PROXY` in the shell you run Task from (`task run -- env`). |
 | `Timed out waiting for SSH on the jump host` | Your public IP changed: update `allowed_cidrs` and rerun `open-access`. |
 | `bind 127.0.0.1:1080: Address already in use` | An old tunnel lost its control socket: `pkill -f 'ssh.*-D 127.0.0.1:1080'`, then rerun `open-access`. |
 | Kubernetes API or Nexus is unreachable | Run `open-access` in the same environment. Check the operator CIDR. |
 | SSH `REMOTE HOST IDENTIFICATION HAS CHANGED` after VMs were recreated | Delete `.local-runtime/known_hosts-$stack`. |
 | Nexus upload fails | Check that `.local-runtime/bundle/nexus.tar.gz` exists. On the VM: `systemctl status nexus`, `/opt/sonatype-work/nexus3/log/nexus.log`. |
-| Kubemarine fails on packages or images | Nexus is not fully loaded: rerun `nexus-load` with access open, then reinstall with `-replace=terraform_data.install`. |
+| Kubemarine fails on packages or images | Nexus is not fully loaded: rerun `task -d local nexus:load` with access open, then reinstall with `-replace=terraform_data.install`. |
 | Kubemarine fails otherwise | The apply output and `.local-runtime/kubemarine/$stack/dump/debug.log`. |
 | Application pod `ImagePullBackOff` | The image is missing from `app_images` in the manifest, or its registry is new: rebuild, reload, and reinstall `kubemarine` so containerd gets the mirror. |
 | Azure `QuotaExceeded` | The vCPU quota is lower than the stack needs; see [Azure prerequisites](#azure-prerequisites). |

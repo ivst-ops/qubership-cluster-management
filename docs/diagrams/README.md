@@ -30,13 +30,13 @@ The source project has not been modified.
 | Discovery and stack names | [atmos.yaml](../../atmos.yaml) |
 | Customer configuration | [AWS staging](../../stacks/customers/customer1/aws/staging.yaml), [Azure staging](../../stacks/customers/customer1/azure/staging.yaml), and their imported defaults/catalogs |
 | Execution and deletion | [AWS workflows](../../workflows/customers/customer1/staging-terraform.yaml), [Azure workflows](../../workflows/customers/customer1/azure.yaml) |
-| Nexus readiness | [Terraform readiness](../../components/terraform/aws/nexus/readiness.tf), [local endpoint script](../../local/scripts/Get-NexusTerraformEndpoint.ps1) |
+| Nexus readiness | [OpenTofu readiness](../../components/terraform/aws/nexus/readiness.tf), [local endpoint program](../../local/lab.sh) (`nexus-endpoint-json`) |
 | AWS routing | [load-balancer implementation](../../components/terraform/aws/load-balancer/) |
 | Shared applications | [Helmfile implementations](../../components/helmfile/), [Helmfile catalogs](../../stacks/catalog/helmfile/) |
-| Emulator lifecycle | [AWS Compose](../../local/compose.yml), [Azure Compose](../../local/compose.azure.yml), [local scripts](../../local/scripts/) |
+| Emulator lifecycle | [AWS Compose](../../local/compose.yml), [Azure Compose](../../local/compose.azure.yml), [developer tasks](../../Taskfile.yml), [operator tasks](../../local/Taskfile.yml) |
 
 AWS VPC/subnet outlines represent API resources; local containers communicate over Docker networking.
-Nexus has a dynamically published port, resolved by its endpoint script.
+Nexus has a dynamically published port, resolved by its endpoint program.
 Headlamp is installed and removed by the current customer workflows.
 
 Azure startup and deployment are separate operations. Start-AzureLocal does not call Prepare-AzureCluster;
