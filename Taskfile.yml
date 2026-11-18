@@ -17,6 +17,10 @@ version: '3'
 
 includes:
   docs: taskfiles/docs.yml
+  # `task lint`: the quality-gate scanners (tflint, Trivy, yamllint) in their own images.
+  lint:
+    taskfile: taskfiles/lint.yml
+    dir: .
 
 vars:
   DEV_IMAGE: qcm-tools:dev

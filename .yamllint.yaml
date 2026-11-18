@@ -1,0 +1,36 @@
+# yamllint settings for `task lint:yamllint` (compose.lint.yml): syntax, duplicate keys, indentation and truthy values
+# of the stacks, workflows and CI files. Go templates (*.gotmpl) are not plain YAML and are not checked.
+extends: default
+
+yaml-files:
+  - "*.yaml"
+  - "*.yml"
+  - .yamllint.yaml
+
+ignore: |
+  **/.terraform/
+  .local-runtime/
+  .task/
+  .claude/
+  dist/
+  **/templates/
+
+rules:
+  document-start: disable
+  line-length:
+    max: 160
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  truthy:
+    # GitHub Actions uses `on:` as a key.
+    allowed-values: ["true", "false"]
+    check-keys: false
+  indentation:
+    spaces: 2
+    indent-sequences: whatever
+  braces:
+    max-spaces-inside: 1
+  brackets:
+    max-spaces-inside: 1

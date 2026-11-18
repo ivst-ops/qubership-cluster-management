@@ -1,0 +1,32 @@
+name: Quality gate
+
+# `task lint`, the same as locally; see docs/quality-gate.md.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # devbox.json: Task and the other developer tools, as in `devbox shell`.
+      - uses: jetify-com/devbox-install-action@05e954310554b6122a26b4880d69937f61b1eb2e # v0.16.0
+        with:
+          devbox-version: 0.18.4
+          enable-cache: true
+      - name: tflint, Trivy, yamllint
+        run: devbox run -- task lint
+      # The committed diagrams equal a fresh generation (docs/diagrams); the generator image builds from a pinned
+      # Python base and runs without network.
+      - name: Diagrams are up to date
+        run: devbox run -- task docs:diagrams:check

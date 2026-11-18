@@ -1,0 +1,3 @@
+# Accepted Trivy findings that cannot be written inline; rules in docs/quality-gate.md (Accepted findings).
+misconfigurations: []
+secrets: []

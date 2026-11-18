@@ -30,6 +30,8 @@ resource "aws_vpc_security_group_ingress_rule" "http" {
 }
 
 
+# Accepted until 2027-02-17: public by design, the ALB publishes the stack UIs to the operators.
+#trivy:ignore:AWS-0053:exp:2027-02-17
 resource "aws_lb" "argocd" {
   name               = "${var.environment}-argocd"
   internal           = false
@@ -65,6 +67,9 @@ data "aws_instance" "node" {
 }
 
 
+# Without certificate_arn the ALB serves plain HTTP; with it, HTTP only redirects to the HTTPS listener below.
+# Accepted until 2027-02-17: no certificate configured (certificate_arn is null), so plain HTTP.
+#trivy:ignore:AWS-0054:exp:2027-02-17
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.argocd.arn
 

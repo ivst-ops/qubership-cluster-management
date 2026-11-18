@@ -1,0 +1,34 @@
+# Quality gate, included by Taskfile.yml as `lint`; see docs/quality-gate.md.
+version: '3'
+
+vars:
+  LINT: docker compose -f compose.lint.yml run --rm --quiet-pull
+
+tasks:
+  default:
+    desc: 'Quality gate: tflint, Trivy (misconfiguration and secrets), yamllint, identical module copies; changes nothing'
+    cmds:
+      - task: tflint
+      - task: trivy
+      - task: yamllint
+
+  tflint:
+    desc: tflint over components/terraform (bundled terraform ruleset, .tflint.hcl)
+    cmds:
+      - '{{.LINT}} tflint'
+
+  trivy:
+    desc: 'Trivy: secrets, Dockerfiles, Kubernetes YAML, then each OpenTofu module with its trivy.tfvars (trivy.yaml)'
+    cmds:
+      - '{{.LINT}} trivy'
+      - '{{.LINT}} trivy-tf'
+
+  yamllint:
+    desc: yamllint of the stacks, workflows and CI files (.yamllint.yaml)
+    cmds:
+      - '{{.LINT}} yamllint'
+
+  pull:
+    desc: Pull the scanner images into the local Docker (before going offline; mirroring into Nexus is separate)
+    cmds:
+      - docker compose -f compose.lint.yml pull

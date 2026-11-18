@@ -23,6 +23,7 @@ Dockerfile changes:
 devbox shell
 task --list                       # everything below and more
 task test                         # stacks, module validation and tests, script syntax; changes nothing
+task lint                         # quality gate: tflint, Trivy (misconfiguration, secrets), yamllint; Docker only
 task e2e                          # what CI deploys: Floci up, deploy, check, destroy, release (CLOUD=azure; KEEP=true keeps the lab; customer2 has no destroy workflow: CUSTOMER=customer2 KEEP=true)
 task tools:shell                  # a shell with Atmos, OpenTofu, kubectl, Kubemarine...
 task image:release                # the linux/amd64 tools image, as CI builds it (qcm-tools:local)
@@ -62,6 +63,7 @@ task docs:diagrams                # regenerate docs/diagrams (manual; docs:diagr
 
 1. [First run with Floci](docs/getting-started.md): install, `task test`, the local AWS or Azure lab.
 1. [Local development](docs/local-development.md): lab tasks, parallel labs, image cache, CI, recovery.
+1. [Quality gate and cost-allocation tags](docs/quality-gate.md): `task lint`, accepted findings, FinOps tags.
 1. [VM installation](docs/vm-installation.md): Kubemarine, the offline bundle and its GitHub release.
 1. [Managed cloud preparation](docs/deployment.md): real Azure and Google Cloud accounts.
 1. [Architecture](docs/architecture.md) and its [diagrams](docs/diagrams/README.md): layout, imports, workflows, values.
