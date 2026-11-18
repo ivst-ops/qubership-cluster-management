@@ -262,3 +262,7 @@ The new ordering pins Kubernetes before Nexus creation, but does not repair an e
 Do not delete state or shared Docker networks to bypass the failure.
 For local Floci HTTP 502, check proxy bypass. For slow Nexus startup, inspect
 /var/log/nexus-install.log and /opt/sonatype-work/nexus3/log/nexus.log inside its EC2 container.
+A Helm release that fails with `context deadline exceeded` while its pod is still pulling an image (a slow first
+pull) needs more time, not a fix: raise `helm_timeout` (seconds; default 600, the lab stacks set 1200) in the
+stack's top-level `helmfile.vars` section, or per component in `components.helmfile.<name>.vars`, then resume the
+workflow from that step with `--from-step`.

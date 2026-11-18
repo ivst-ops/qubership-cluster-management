@@ -4,7 +4,8 @@ repositories:
 
 helmDefaults:
   wait: true
-  timeout: 600
+  # Seconds helm waits for the release (stack var helm_timeout; the helmfile section of a stack sets it for all).
+  timeout: {{ .Values | get "helm_timeout" 600 }}
 
 releases:
   - name: traefik

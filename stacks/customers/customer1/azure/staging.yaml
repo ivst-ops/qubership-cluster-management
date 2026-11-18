@@ -23,6 +23,11 @@ env:
   ARM_CLIENT_SECRET: fake-secret
   NO_PROXY: localhost,127.0.0.1,::1
   KUBECONFIG: ../../../.local-runtime/kubeconfig-customer1-azure-staging.yaml
+helmfile:
+  vars:
+    # Floci lab: images come from the Internet on first pull (istiod took 10m7s once), so give helm 20 minutes.
+    # Per component: components.helmfile.<name>.vars.helm_timeout. Default in the helmfiles: 600.
+    helm_timeout: 1200
 components:
   terraform:
     network:
