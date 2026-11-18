@@ -295,7 +295,7 @@ cmd_prepare_vms() {
 # --- Run logs: one archive per run, collected on success and on failure (task -d local logs:run) --------------------------------------
 
 # Runs COMMAND (the stack secrets are already in the environment: task -d local logs:run applies them), then
-# collects logs into .local-runtime/logs/STACK-<UTC time>-<ok|failed>.tar.gz and uploads it when LOGS_UPLOAD_URL is
+# collects logs into .local-runtime/logs/STACK-<UTC time>-<pid>-<ok|failed>.tar.gz and uploads it when LOGS_UPLOAD_URL is
 # set. Exits with the exit code of COMMAND.
 cmd_run() {
     local stack=$1; shift; check_stack "$stack"
@@ -439,7 +439,7 @@ VM installation (docs/vm-installation.md); SSH commands need the stack secrets (
   prepare-vms STACK      after kubemarine: kubeconfig from the control plane, API through the tunnel
   ssh STACK ADDRESS [CMD] shell or command on a private VM through the jump host
 Run logs (task -d local logs:run):
-  run STACK CMD...       run CMD, then collect logs into .local-runtime/logs/STACK-<time>-<ok|failed>.tar.gz;
+  run STACK CMD...       run CMD, then collect logs into .local-runtime/logs/STACK-<time>-<pid>-<ok|failed>.tar.gz;
                          LOGS_UPLOAD_URL uploads the archive (s3://, gs://, Azure SAS URL)
 EOF
        exit 2 ;;

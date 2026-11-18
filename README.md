@@ -33,7 +33,7 @@ task image:release                # the linux/amd64 tools image, as CI builds it
 - `local/lab.sh` commands → Task: `start` / `start-azure` / `stop` → `task lab:up` / `task lab:up CLOUD=azure` /
   `task lab:stop`; `check` → `task test` / `task test:render`; `secrets-init` / `with-secrets` / `tunnel … stop` →
   `task ops -- secrets:init` / `secrets:exec` / `tunnel:stop`.
-- `local/lab.sh run <stack> <command>` (run logs, upstream #5) → `task -d local logs:run STACK=<stack> -- <command>`;
+- `local/lab.sh run <stack> <command>` (run logs) → `task -d local logs:run STACK=<stack> -- <command>`;
   `task lab:deploy` and `task lab:destroy` collect the run logs too.
 - `bundle/build.sh` → `task bundle` (then `task bundle:pack` for a release).
 - The lab stacks no longer set `HTTPS_PROXY`: export the proxy in the shell, Task forwards it to the tools container.
