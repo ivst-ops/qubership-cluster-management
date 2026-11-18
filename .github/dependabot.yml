@@ -1,0 +1,75 @@
+# Version updates, weekly and grouped per ecosystem so that each run opens a few reviewable PRs.
+# Not covered (no package manifest Dependabot reads): the tool versions and SHA256 build args in Dockerfile and
+# devbox.lock; see "Bumping a tool by hand" in docs/local-development.md.
+version: 2
+
+updates:
+  # Actions are pinned by commit SHA with a `# vX.Y.Z` comment on the same line; Dependabot keeps both.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+      include: scope
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Dockerfiles with literal FROM lines, pinned by tag and digest; the ignore rules keep them on ubuntu 24.04 and
+  # python 3.13, so the weekly update is the new digest (base-image security patches).
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /local/lab
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build"
+      include: scope
+    ignore:
+      - dependency-name: ubuntu
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      docker:
+        patterns: ["*"]
+
+  # Images pinned by tag and digest in the compose files (emulators, lint scanners).
+  - package-ecosystem: docker-compose
+    directories:
+      - /
+      - /local
+      - /bundle
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build"
+      include: scope
+    groups:
+      compose-images:
+        patterns: ["*"]
+
+  # Providers and modules of the root modules; each directory holds a .terraform.lock.hcl, which Dependabot updates
+  # with the version. Review the lock file: after an update it may carry fewer platform hashes than before
+  # (`tofu providers lock` with the platforms of the old file restores them).
+  - package-ecosystem: opentofu
+    directories:
+      - /components/terraform/aws/*
+      - /components/terraform/azure/*
+      - /components/terraform/gcp/*
+      - /components/terraform/kubernetes/*
+      - /components/terraform/kubemarine
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build"
+      include: scope
+    groups:
+      opentofu-providers:
+        patterns: ["*"]
