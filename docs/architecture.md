@@ -353,7 +353,10 @@ Parallel branches run in separate processes through `type: atmos`.
 `wait_all` lets both branches finish and fails the workflow if either fails; resources are not rolled back.
 
 `destroy-staging` deletes Nexus and the platform concurrently, then the network. Its internal `destroy-platform`
-branch removes ALB, Kiali CR, Helm releases, and Kubernetes in that order. Nexus readiness is disabled on destroy.
+branch removes ALB, then the services in the cluster (`destroy-services`: the Kiali CR and the Helm releases), then
+Kubernetes: the load balancer component reads the cluster's Services, so it goes first. The Kiali CR step is skipped when
+the Kiali CRD is absent (a deploy that stopped before kiali), so a partial deploy can still be destroyed; the Azure
+`destroy-staging` runs the same steps in sequence. Nexus readiness is disabled on destroy.
 If either branch fails, network deletion does not start.
 
 ## State and generated files

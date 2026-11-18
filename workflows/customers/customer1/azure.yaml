@@ -30,7 +30,12 @@ workflows:
         command: terraform destroy load-balancer -input=false -auto-approve
       - name: kiali-instance
         type: shell
-        command: kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml delete kiali kiali -n istio-system --ignore-not-found=true --wait=true --timeout=180s
+        # Without the Kiali CRD (a deploy that stopped before kiali) there is nothing to delete; --ignore-not-found does
+        # not cover a missing resource type. An API error still fails the step.
+        command: >-
+          crd=$(kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml get crd kialis.kiali.io --ignore-not-found -o name)
+          && { [ -z "$crd" ] || kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml
+          delete kiali kiali -n istio-system --ignore-not-found=true --wait=true --timeout=180s; }
       - name: headlamp
         command: helmfile destroy headlamp
       - name: minio
