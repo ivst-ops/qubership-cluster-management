@@ -24,6 +24,9 @@ components:
     kubernetes:
       metadata:
         terraform_workspace: customer2-aws-staging
+      vars:
+        # The local lab reaches the API from outside the VPC; a real stack lists its operator and runner CIDRs.
+        public_access_cidrs: ["0.0.0.0/0"]
     network:
       metadata:
         terraform_workspace: customer2-aws-staging

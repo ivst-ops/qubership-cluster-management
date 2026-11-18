@@ -31,6 +31,17 @@ variable "tenant" {
   default = null
 }
 
+variable "certificate_arn" {
+  description = "ARN of the ACM certificate for the HTTPS listener. Set: HTTPS on port 443 (TLS 1.3/1.2 policy) and HTTP redirects to it. Null: plain HTTP only"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.certificate_arn == null || can(regex("^arn:[a-z-]+:acm:", var.certificate_arn))
+    error_message = "certificate_arn must be an ACM certificate ARN (arn:aws:acm:...)."
+  }
+}
+
 variable "headlamp_node_port" {
   type = number
 }

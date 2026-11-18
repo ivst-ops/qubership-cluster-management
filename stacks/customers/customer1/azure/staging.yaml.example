@@ -22,3 +22,7 @@ components:
         subnets:
           kubernetes:
             cidr_block: 10.60.1.0/24
+    kubernetes:
+      vars:
+        # Who may reach the Kubernetes API server: your operator and CI runner CIDRs (0.0.0.0/0 only for a lab).
+        api_server_authorized_ip_ranges: ["REPLACE_WITH_OPERATOR_CIDR"]

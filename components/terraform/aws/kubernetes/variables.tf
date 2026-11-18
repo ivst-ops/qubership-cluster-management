@@ -35,3 +35,14 @@ variable "local_endpoint" {
   type        = string
   default     = null
 }
+
+variable "public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the public Kubernetes API endpoint. Empty (default): no public endpoint, the API is reachable from inside the VPC only. The lab stacks set 0.0.0.0/0"
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for c in var.public_access_cidrs : can(cidrhost(c, 0))])
+    error_message = "public_access_cidrs must be CIDR blocks, for example 203.0.113.0/24."
+  }
+}

@@ -50,7 +50,15 @@ resource "aws_instance" "vm" {
 
   vpc_security_group_ids = [aws_security_group.main.id]
 
+  # IMDSv2 only. Hop limit 2: pods on the Kubernetes nodes reach the metadata through the node's network namespace.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
   root_block_device {
+    encrypted   = true
     volume_size = each.value.volume_size
   }
 

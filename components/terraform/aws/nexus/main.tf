@@ -18,6 +18,15 @@ resource "aws_instance" "nexus" {
 
   vpc_security_group_ids = [aws_security_group.nexus.id]
 
+  # IMDSv2 only: a token is required for the instance metadata (SSRF cannot read the instance role credentials).
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+  root_block_device {
+    encrypted = true
+  }
   tags = {
     Name        = "${var.environment}-nexus"
     Environment = var.environment

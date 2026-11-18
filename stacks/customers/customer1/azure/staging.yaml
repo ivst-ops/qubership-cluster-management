@@ -45,6 +45,8 @@ components:
       vars:
         node_count: 1
         manage_network_role_assignment: false
+        # The local lab reaches the API from outside; a real stack lists its operator and runner CIDRs.
+        api_server_authorized_ip_ranges: ["0.0.0.0/0"]
     load-balancer:
       metadata:
         terraform_workspace: customer1-azure-staging

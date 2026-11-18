@@ -46,3 +46,13 @@ variable "dns_service_ip" {
   type    = string
   default = "172.20.0.10"
 }
+
+variable "api_server_authorized_ip_ranges" {
+  description = "CIDR blocks allowed to reach the Kubernetes API server. Required, so that an open API is a decision of the stack: the lab stacks set 0.0.0.0/0"
+  type        = list(string)
+
+  validation {
+    condition     = length(var.api_server_authorized_ip_ranges) > 0 && alltrue([for c in var.api_server_authorized_ip_ranges : can(cidrhost(c, 0))])
+    error_message = "api_server_authorized_ip_ranges must list at least one CIDR block, for example 203.0.113.0/24."
+  }
+}
