@@ -1,0 +1,10 @@
+# Rows of the "Parameters" table of a Helmfile component: the top-level keys of components.helmfile.<NAME>.vars in its
+# catalog file, with the catalog default (a scalar or an empty map as it is, a map as its keys, a list as its length).
+.components.helmfile[strenv(NAME)].vars // {} | to_entries | .[]
+| "| `" + .key + "` | "
+  + (
+      (select((.value | tag == "!!map") and (.value | length) > 0) | "map: " + (.value | keys | map("`" + . + "`") | join(", ")))
+      // (select(.value | tag == "!!seq") | "list of " + (.value | length | tostring))
+      // ("`" + (.value | tostring) + "`")
+    )
+  + " |"

@@ -70,4 +70,5 @@ tasks:
   pull:
     desc: Pull the scanner images into the local Docker (before going offline; mirroring into Nexus is separate)
     cmds:
-      - docker compose -f compose.lint.yml pull
+      - docker compose -f compose.lint.yml pull --ignore-buildable
+      - docker compose -f compose.lint.yml build --pull docs-check

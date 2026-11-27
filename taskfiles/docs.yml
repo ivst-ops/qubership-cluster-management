@@ -4,6 +4,9 @@
 version: '3'
 
 vars:
+  # The docs-lint image (compose.lint.yml); built from its pinned base images on first use.
+  DOCS_LINT: >-
+    QCM_UID=$(id -u) QCM_GID=$(id -g) docker compose -f '{{.ROOT_DIR}}/compose.lint.yml' run --rm --build --quiet-build
   DIAGRAMS: >-
     QCM_UID=$(id -u) QCM_GID=$(id -g) docker compose -f '{{.ROOT_DIR}}/docs/diagrams/compose.yml' run --rm --build --quiet-build diagrams
 
@@ -17,3 +20,28 @@ tasks:
     desc: Fail when the committed diagrams differ from a fresh generation (e.g. the generator changed without them)
     cmds:
       - '{{.DIAGRAMS}} --check'
+
+  generate:
+    desc: 'Rewrite the generated block of every component and module README (terraform-docs, stack catalog); hand-written text stays'
+    cmds:
+      - task: versions
+      - '{{.DOCS_LINT}} docs-generate'
+
+  check:
+    desc: 'Fail when a README is missing, has no hand-written purpose, or differs from its module and the stack catalog; changes nothing'
+    cmds:
+      - task: versions
+      - '{{.DOCS_LINT}} docs-check'
+
+  versions:
+    internal: true
+    silent: true
+    vars:
+      TOOLS_YQ:
+        sh: sed -n 's/^ARG YQ_VERSION=//p' '{{.ROOT_DIR}}/Dockerfile'
+      DOCS_YQ:
+        sh: sed -n 's|^FROM mikefarah/yq:\([^@]*\)@.*|\1|p' '{{.ROOT_DIR}}/docs/docs-lint/Dockerfile'
+    cmds:
+      - cmd: >-
+          echo "docs - yq {{.DOCS_YQ}} in docs/docs-lint/Dockerfile differs from YQ_VERSION {{.TOOLS_YQ}} of the tools image"; exit 1
+        if: test '{{.TOOLS_YQ}}' != '{{.DOCS_YQ}}'
