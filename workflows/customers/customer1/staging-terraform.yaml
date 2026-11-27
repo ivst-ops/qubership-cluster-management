@@ -1,6 +1,6 @@
 workflows:
   deploy-staging:
-    description: Deploy staging with Terraform-managed Nexus readiness
+    description: Deploy staging with OpenTofu-managed Nexus readiness
     stack: customer1-aws-staging
     steps:
       - name: network
@@ -11,7 +11,7 @@ workflows:
         command: terraform apply kubernetes --from-plan -input=false -auto-approve
       - name: access
         type: shell
-        command: pwsh -NoProfile -File ./local/scripts/Prepare-Cluster.ps1 -Stack customer1-aws-staging
+        command: task -d local prepare STACK=customer1-aws-staging
       - name: services
         type: parallel
         max_concurrency: 2
@@ -28,7 +28,7 @@ workflows:
             type: atmos
             command: workflow deploy-platform -f customers/customer1/staging-terraform
   deploy-nexus:
-    description: Create Nexus and wait for readiness in a single Terraform apply
+    description: Create Nexus and wait for readiness in a single OpenTofu apply
     stack: customer1-aws-staging
     steps:
       - name: apply
@@ -78,9 +78,22 @@ workflows:
     steps:
       - name: load-balancer
         command: terraform destroy load-balancer -auto-approve
+      - name: services
+        command: workflow destroy-services -f customers/customer1/staging-terraform
+      - name: kubernetes
+        command: terraform destroy kubernetes -auto-approve
+  destroy-services:
+    description: Remove the Kiali instance and the Helm releases in the cluster (task lab:destroy skips it when the state holds no cluster)
+    stack: customer1-aws-staging
+    steps:
       - name: kiali-instance
         type: shell
-        command: kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-aws-staging.yaml delete kiali kiali -n istio-system --ignore-not-found=true --wait=true --timeout=180s
+        # Without the Kiali CRD (a deploy that stopped before kiali) there is nothing to delete; --ignore-not-found does
+        # not cover a missing resource type. An API error still fails the step.
+        command: >-
+          crd=$(kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-aws-staging.yaml get crd kialis.kiali.io --ignore-not-found -o name)
+          && { [ -z "$crd" ] || kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-aws-staging.yaml
+          delete kiali kiali -n istio-system --ignore-not-found=true --wait=true --timeout=180s; }
       - name: headlamp
         command: helmfile destroy headlamp
       - name: minio
@@ -91,5 +104,11 @@ workflows:
         command: helmfile destroy argocd
       - name: istio
         command: helmfile destroy istio
-      - name: kubernetes
-        command: terraform destroy kubernetes -auto-approve
+  destroy-infra:
+    description: Remove Nexus and the network of a stack without a cluster (task lab:destroy runs it when the state holds none)
+    stack: customer1-aws-staging
+    steps:
+      - name: nexus
+        command: terraform destroy nexus -auto-approve -var=nexus_wait_for_ready=false
+      - name: network
+        command: terraform destroy network -auto-approve

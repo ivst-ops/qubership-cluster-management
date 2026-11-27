@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-Atmos resolves customer, cloud, and environment settings. Terraform provisions infrastructure.
+Atmos resolves customer, cloud, and environment settings. OpenTofu provisions infrastructure.
 Helmfile installs applications. Managed stacks use the cloud Kubernetes module. Floci supplies
 the local AWS and Azure environments. Kubemarine stacks provision VMs and install Kubernetes
 over SSH with packages, images, and charts served by Nexus.
@@ -23,7 +23,7 @@ workspaces/backends and names. Deployment and deletion workflows operate on the 
 
 ## File responsibilities
 
-Terraform reads all `.tf` files in a component directory as one root module. File naming does not determine resource creation order.
+OpenTofu reads all `.tf` files in a component directory as one root module. File naming does not determine resource creation order.
 
 | File | Responsibility |
 |---|---|
@@ -31,9 +31,9 @@ Terraform reads all `.tf` files in a component directory as one root module. Fil
 | `variables.tf` | Accepted inputs, types, defaults, and validation |
 | `outputs.tf`, where present | Values exposed to consumers after provisioning |
 | `providers.tf` | Connections to cloud APIs or Kubernetes |
-| `versions.tf` | Terraform and provider requirements |
+| `versions.tf` | OpenTofu and provider requirements |
 | `.terraform.lock.hcl` | Selected provider versions and checksums |
-| Nexus `user-data.sh.tftpl` | An installation script rendered by Terraform and executed inside the VM after startup |
+| Nexus `user-data.sh.tftpl` | An installation script rendered by OpenTofu and executed inside the VM after startup |
 | `helmfile.yaml.gotmpl` | Chart repositories, releases, namespaces, versions, values references, and release needs |
 | `values*.yaml.gotmpl` | Translation of resolved Atmos parameters into chart values |
 | `charts/minio-bucket/` | A local chart containing the bucket-creation job that runs after MinIO |
@@ -52,12 +52,15 @@ components/
     azure/{network,kubernetes,load-balancer,vms}/
     gcp/{network,kubernetes,load-balancer,vms}/
     kubemarine/                           # Kubernetes inventory and installer
-  helmfile/{argocd,istio,kiali,minio,headlamp}/
+    kubernetes/{nginx,ingress-wait,job-wait,manifest-wait}/   # readiness examples of customer1 AWS
+  helmfile/{argocd,istio,kiali,minio,headlamp,traefik}/
+  helmfile/warm-chart.sh                  # chart download retries (prepare hook of each release)
 stacks/
   catalog/
     {aws,azure,gcp}/                       # cloud infrastructure settings
     helmfile/                             # shared application settings
     kubemarine/                           # VM groups, installer, Nexus chart settings
+    kubernetes/                           # readiness example settings
   customers/
     customer1/
       _defaults.yaml
@@ -73,16 +76,24 @@ workflows/
   customers/customer2/aws.yaml
   {azure,gcp,helmfile}.yaml
 bundle/                                   # offline artifact manifest and scripts
+  {apt.sh,compose.yml}                    # node OS packages, built in a clean container of the node OS
 secrets/                                  # SOPS instructions and encrypted stack secrets
-Dockerfile                                # Linux tools image
+Dockerfile                                # Linux tools image (production tools)
+compose.yml                               # tools container for the developer Taskfile
+Taskfile.yml                              # developer tasks on the host: images, tests, lab, e2e, bundle
+taskfiles/{docs,lint}.yml                 # included Taskfiles: `task docs:diagrams`, `task lint` (docs/quality-gate.md)
+devbox.json                               # developer tools (`devbox shell`), Task among them
 local/
-  {compose.yml,compose.azure.yml,settings.example.json}
-  scripts/                                # Floci and managed access
-  lab.sh                                  # Kubemarine operator tasks
+  {compose.yml,compose.azure.yml,settings.example.json}   # Floci emulators and lab settings
+  compose.cache.yml                       # registry pull-through cache shared by the labs of the host
+  lab-env.sh                              # leases the lab environment (slot) of a checkout
+  Taskfile.yml                            # operator tasks in the tools image: prepare, secrets, tunnel, Nexus...
+  lab.sh                                  # Bash part of the operator tasks
+  lab/                                    # lab sidecar image: Docker operations for lab.sh over HTTP
 docs/
 ```
 
-Local settings, runtime files, Floci data, and Terraform state are excluded from Git.
+Local settings, runtime files, Floci data, and OpenTofu state are excluded from Git.
 Provider lock files remain in the repository.
 
 ## File discovery and stack names
@@ -91,9 +102,11 @@ Provider lock files remain in the repository.
 Atmos discovers final stack manifests through `customers/**/*.yaml`, excluding `_defaults.yaml`.
 `.yaml.example` templates are inactive. Defaults and catalogs are loaded through explicit `import` entries;
 directory nesting does not create inheritance automatically.
+`atmos.yaml` enables Go templates (with Sprig) in every stack manifest (the lab stacks read their names, endpoints
+and VPC ranges from the lab environment); escape a literal `{{` as `{{ "{{" }}`.
 
 The stack name combines `tenant`, `cloud`, and `stage`, for example `customer1-aws-staging`.
-The migrated AWS `environment` remains `customer1-staging`: this identifies resources, rather than the Atmos stack.
+The migrated AWS `environment` remains `customer1-staging` (`customer1-staging-sN` in lab slot N): this identifies resources, rather than the Atmos stack.
 The implementation is selected by `metadata.component`, not by `cloud` alone.
 
 ## Imports and overrides
@@ -105,24 +118,26 @@ customers/customer1/aws/staging.yaml
 ├─ customers/customer1/aws/_defaults.yaml
 │  └─ customers/customer1/_defaults.yaml
 ├─ catalog/aws/{network,kubernetes,load-balancer,nexus}.yaml
-└─ catalog/helmfile/{istio,argocd,kiali,minio,headlamp}.yaml
+├─ catalog/helmfile/{istio,argocd,kiali,minio,headlamp}.yaml
+└─ catalog/{kubernetes/{nginx,ingress-wait,job-wait,manifest-wait},helmfile/traefik}.yaml   # readiness examples
 ```
 
 | File | Configuration supplied |
 |---|---|
 | Customer `_defaults.yaml` | tenant |
 | Cloud `_defaults.yaml` | cloud, region, local endpoint, local_lab, and tool environment |
-| `stacks/catalog/...` | Shared component parameters, physical Terraform paths, output references, and Terraform-managed Nexus readiness settings |
+| `stacks/catalog/...` | Shared component parameters, physical OpenTofu paths, output references, and OpenTofu-managed Nexus readiness settings |
 | Final `staging.yaml` | stage, environment, CIDRs, workspaces, kubeconfig, and application overrides |
 
 Maps merge by key; lists are replaced as a whole. The final stack overrides imported values.
 Customer2 imports network, kubernetes, and five Helmfile components, without Nexus or ALB.
-It has separate CIDRs, workspaces, and kubeconfig. Its existing deployment is sequential and requests Terraform confirmation;
-no customer2 destroy workflow is currently defined.
+It has separate CIDRs, workspaces, and kubeconfig. Its deployment is sequential; its applies have no `-auto-approve`,
+so `task lab:deploy` approves them and a direct `atmos workflow` run asks. No customer2 destroy workflow is defined yet
+(`task e2e CUSTOMER=customer2 KEEP=true`).
 
 ### Inheritance versus execution dependencies
 
-- `import` loads and merges YAML configuration. It does not execute Terraform or Helmfile.
+- `import` loads and merges YAML configuration. It does not execute OpenTofu or Helmfile.
 - `metadata.inherits` is Atmos component configuration inheritance. Kubemarine VM groups inherit settings from an abstract VM component.
 - `metadata.component: aws/network` maps a logical component to its implementation directory.
 - `!terraform.state network subnet_ids` reads an input dependency from network state. It does not create the network automatically.
@@ -142,7 +157,7 @@ For `atmos terraform apply network -s customer1-aws-staging`:
 3. It merges global vars with `components.terraform.network.vars`.
 4. `metadata.component: aws/network` selects `components/terraform/aws/network/`.
 5. Atmos passes the resolved vars through a generated varfile, selects the workspace, and runs apply.
-6. Terraform reads the root module, calls its providers, and writes state and outputs.
+6. OpenTofu reads the root module, calls its providers, and writes state and outputs.
 
 `atmos helmfile apply argocd -s customer1-aws-staging` uses the same stack but selects
 `components.helmfile.argocd` and `components/helmfile/argocd/`. Its parameters become Helmfile state values.
@@ -156,10 +171,10 @@ For `atmos terraform apply network -s customer1-aws-staging`:
 | Resources created by AWS network | `.tf` files in `components/terraform/aws/network/` |
 | One deployment's network CIDR | `components.terraform.network.vars` in its final stack |
 | Installation or deletion order | The customer's workflow |
-| Local Floci/UI lifecycle | `local/compose.yml` and the corresponding Start/Stop scripts |
-| Node and kubeconfig preparation | Prepare-Cluster.ps1 and functions in Local-Lab.psm1 |
+| Local Floci/UI lifecycle | `local/compose.yml`, `local/compose.azure.yml` and `task lab:up` / `lab:stop` |
+| Node and kubeconfig preparation | `task -d local prepare` / `prepare-azure`: `local/lab.sh` and the lab sidecar |
 
-## Terraform components and dependencies
+## OpenTofu components and dependencies
 
 Each physical component directory is a separate root module with its own inputs, providers, state, and plan.
 Dependencies are passed as input identifiers rather than by including another component's source code.
@@ -190,9 +205,9 @@ and cloud defaults, the cloud network, the shared application catalogs, and the
 
 | Catalog file | What it supplies |
 |---|---|
-| `aws-vms.yaml` or `azure-vms.yaml` | Maps `jump-host`, `nexus`, and `vms` to the cloud VM module. The groups consume network outputs and have separate state. The workflow applies them sequentially because they share a module working directory. |
-| `install.yaml` | Passes VM outputs to the installer. Terraform generates the inventory and runs Kubemarine on the operator machine. Kubemarine connects to the nodes through the jump host. |
-| `offline.yaml` | Reads the private Nexus address from Terraform state and the chart versions from the bundle manifest. Supplies the repository URL and SOCKS proxy to the shared Helmfile components. |
+| `aws-vms.yaml`, `azure-vms.yaml` or `gcp-vms.yaml` | Maps `jump-host`, `nexus`, and `vms` (sizes and ports, inheriting the abstract `vm-group`) to the cloud VM module. The groups consume network outputs and have separate state. The workflow applies them sequentially because they share a module working directory. |
+| `install.yaml` | Passes VM outputs to the installer (Calico with `crossSubnet: false`). OpenTofu generates the inventory and runs Kubemarine on the operator machine. Kubemarine connects to the nodes through the jump host. |
+| `offline.yaml` | Reads the private Nexus address from OpenTofu state and the chart versions from the bundle manifest. Supplies the repository URL and SOCKS proxy to the shared Helmfile components. |
 
 See the [VM installation guide](vm-installation.md) for deployment, access, and deletion commands.
 
@@ -270,7 +285,6 @@ cr:
 
 These excerpts show only three keys; the complete catalog also contains `cr.spec` and the surrounding Atmos structure.
 JSON formatting is not required by Atmos or Helmfile and adds no extra inheritance or processing step.
-This documentation update leaves the existing configuration files unchanged.
 
 ### Kiali: from catalog settings to a Custom Resource
 
@@ -314,11 +328,11 @@ During destruction, the workflows delete the Kiali Custom Resource before uninst
 
 ### Inspect the resolved configuration and rendered manifest
 
-Run these commands from the repository root. Both were checked in this repository and do not apply resources:
+Run these commands from the repository root in `devbox shell`; neither applies resources:
 
-```powershell
-atmos describe component kiali -s customer1-aws-staging --process-functions=false --format yaml
-atmos helmfile template kiali -s customer1-aws-staging --skip-deps
+```bash
+task run -- atmos describe component kiali -s customer1-aws-staging --process-functions=false --format yaml
+task run -- atmos helmfile template kiali -s customer1-aws-staging --skip-deps
 ```
 
 The first command shows the resolved Atmos configuration: look for `vars.values.cr`.
@@ -332,7 +346,7 @@ Helmfile rendering needs Helm, Helmfile, helm-diff, and chart availability as de
 Customer1 deployment and deletion are defined in [staging-terraform.yaml](../workflows/customers/customer1/staging-terraform.yaml).
 
 ```text
-network → plan/apply Kubernetes → Prepare-Cluster
+network → plan/apply Kubernetes → task -d local prepare
                                    ↓
                                 parallel
                                 ├─ Nexus: one apply → VM → endpoint → HTTP 200
@@ -341,20 +355,27 @@ network → plan/apply Kubernetes → Prepare-Cluster
 
 The internal workflows `deploy-nexus` and `deploy-platform` are called by `deploy-staging`.
 The Nexus catalog enables `nexus_wait_for_ready`; the workflow inherits this setting through the stack.
-Within the Nexus Terraform module, the HTTP data source depends on the VM and its ingress rule.
-For local Floci, the external provider calls `local/scripts/Get-NexusTerraformEndpoint.ps1` with the VM ID
+Within the Nexus OpenTofu module, the HTTP data source depends on the VM and its ingress rule.
+For local Floci, the external provider calls `local/lab.sh nexus-endpoint-json` with the VM ID
 and supplies the dynamically published URL to the HTTP provider. In real AWS, the URL uses the instance public
-IP, falling back to private IP, and the external script is not called. The Terraform runner needs network access.
+IP, falling back to private IP, and the external script is not called. The OpenTofu runner needs network access.
 HTTP 200 from `/service/rest/v1/status/writable` confirms write readiness without an admin password.
 On initial creation, endpoint discovery and the HTTP read run after their dependencies in the same apply;
-with unchanged dependencies, Terraform can read data sources during planning. There is no Atmos readiness hook.
+with unchanged dependencies, OpenTofu can read data sources during planning. There is no Atmos readiness hook.
 
 Parallel branches run in separate processes through `type: atmos`.
 `wait_all` lets both branches finish and fails the workflow if either fails; resources are not rolled back.
 
 `destroy-staging` deletes Nexus and the platform concurrently, then the network. Its internal `destroy-platform`
-branch removes ALB, Kiali CR, Helm releases, and Kubernetes in that order. Nexus readiness is disabled on destroy.
+branch removes ALB, then the services in the cluster (`destroy-services`: the Kiali CR and the Helm releases), then
+Kubernetes: the load balancer component reads the cluster's Services, so it goes first. The Kiali CR step is skipped when
+the Kiali CRD is absent (a deploy that stopped before kiali), so a partial deploy can still be destroyed; the Azure
+`destroy-staging` runs the same steps in sequence. Nexus readiness is disabled on destroy.
 If either branch fails, network deletion does not start.
+`task lab:destroy` runs `destroy-staging` when the OpenTofu state of the `kubernetes` component holds a cluster
+(writing the kubeconfig again first if it is missing). Without a cluster it runs `destroy-infra` (Nexus and the network;
+the network alone on Azure), or nothing when the network has no resources either, because the services workflow has no
+kubeconfig to work with. Real AWS always runs `destroy-staging`.
 
 ## State and generated files
 
@@ -368,15 +389,15 @@ Do not run concurrent workflows against the same stack. Team use requires a sepa
 
 - Customer: add defaults and final stack manifests importing the required catalogs.
 - Environment: add a YAML manifest under the customer's cloud directory with distinct stage, workspace, and kubeconfig.
-- Terraform component: add a root module, catalog, stack import, and workflow steps respecting its dependencies.
+- OpenTofu component: add a root module, catalog, stack import, and workflow steps respecting its dependencies.
 - Helm component: add a Helmfile/values directory, parameter catalog, stack import, and workflow step.
 - Additional cluster in one environment: first extend stack identity and state/kubeconfig separation to prevent collisions.
 
 Use these concrete commands to inspect the current AWS stack:
 
-```powershell
-atmos validate stacks
-atmos describe component network -s customer1-aws-staging --process-functions=false
+```bash
+task run -- atmos validate stacks
+task run -- atmos describe component network -s customer1-aws-staging --process-functions=false
 ```
 
-Review the Terraform plan before applying. See [Azure/GCP preparation](deployment.md) for cloud templates.
+Review the OpenTofu plan before applying. See [Azure/GCP preparation](deployment.md) for cloud templates.

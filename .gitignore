@@ -11,8 +11,13 @@ local/floci-data/
 local/floci-azure-data/
 local/backups/
 local/settings.json
+local/dev.env
 *.log
 *.pem
 *.key
 kubeconfig*
 admin.txt
+.task/
+dist/
+.devbox/
+.claude/worktrees/

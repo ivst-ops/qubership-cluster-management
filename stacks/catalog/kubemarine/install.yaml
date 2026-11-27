@@ -1,6 +1,6 @@
 # Kubernetes on the VMs of a catalog/<cloud>/vms, installed by Kubemarine from the operator machine through the
 # jump host, with everything taken from Nexus (docs/vm-installation.md). Helmfile reaches Nexus and the API through
-# the SOCKS tunnel of local/lab.sh; the proxy port below and settings.tunnel_port must match.
+# the SOCKS tunnel of `task -d local tunnel`; the proxy port below and settings.tunnel_port must match.
 components:
   terraform:
     kubemarine:

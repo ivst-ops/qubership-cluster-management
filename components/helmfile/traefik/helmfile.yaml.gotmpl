@@ -4,7 +4,8 @@ repositories:
 
 helmDefaults:
   wait: true
-  timeout: 600
+  # Seconds helm waits for the release (stack var helm_timeout; the helmfile section of a stack sets it for all).
+  timeout: {{ .Values | get "helm_timeout" 600 }}
 
 releases:
   - name: traefik
@@ -12,5 +13,11 @@ releases:
     createNamespace: true
     chart: traefik/traefik
     version: {{ .Values.chart_version | quote }}
+    hooks:
+      # Chart into helm's content cache, with retries, before helm diff and upgrade (../warm-chart.sh).
+      - events: [prepare]
+        showlogs: true
+        command: sh
+        args: [../warm-chart.sh, traefik/traefik, {{ .Values.chart_version | quote }}]
     values:
       - values.yaml.gotmpl

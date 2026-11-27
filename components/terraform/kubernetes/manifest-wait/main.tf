@@ -44,10 +44,10 @@ resource "kubernetes_manifest" "nginx" {
   wait {
     fields = {
       "metadata.annotations[\"test.terraform.io\"]" = "^test$"
-      "status.containerStatuses[0].restartCount"   = "^0$"
-      "status.containerStatuses[0].ready"          = "^true$"
-      "status.podIP"                              = "^(\\d+(\\.|$)){4}"
-      "status.phase"                              = "^Running$"
+      "status.containerStatuses[0].restartCount"    = "^0$"
+      "status.containerStatuses[0].ready"           = "^true$"
+      "status.podIP"                                = "^(\\d+(\\.|$)){4}"
+      "status.phase"                                = "^Running$"
     }
   }
 

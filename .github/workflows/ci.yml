@@ -20,17 +20,29 @@ jobs:
       contents: read
       packages: write
     env:
-      # A fork's PR gets a read-only token: build the image without publishing and pass it to the jobs as an artifact.
-      LOCAL: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+      # A fork's PR and a Dependabot PR get a read-only token (no packages: write) and no repository secrets:
+      # build the image without publishing and pass it to the jobs as an artifact.
+      LOCAL: >-
+        ${{ github.event_name == 'pull_request' && (github.actor == 'dependabot[bot]' ||
+        github.event.pull_request.head.repo.full_name != github.repository) }}
     outputs:
       image: ${{ steps.ref.outputs.image || 'qcm-tools:local' }}
       local: ${{ env.LOCAL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.LOCAL == 'true'
+      # devbox.json: Task and the other developer tools, as in `devbox shell`.
+      - uses: jetify-com/devbox-install-action@05e954310554b6122a26b4880d69937f61b1eb2e # v0.16.0
+        if: env.LOCAL == 'true'
+        with:
+          devbox-version: 0.18.4
+          enable-cache: true
+      - name: Check Docker versions
+        if: env.LOCAL == 'true'
+        run: devbox run -- task doctor
       - name: Build tools image locally
         if: env.LOCAL == 'true'
-        run: docker build -t qcm-tools:local . && docker save -o "$RUNNER_TEMP/tools-image.tar" qcm-tools:local
+        run: devbox run -- task image:release && docker save -o "$RUNNER_TEMP/tools-image.tar" qcm-tools:local
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: env.LOCAL == 'true'
         with:
@@ -62,6 +74,13 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # devbox.json: Task and the other developer tools, as in `devbox shell`.
+      - uses: jetify-com/devbox-install-action@05e954310554b6122a26b4880d69937f61b1eb2e # v0.16.0
+        with:
+          devbox-version: 0.18.4
+          enable-cache: true
+      - name: Check Docker versions
+        run: devbox run -- task doctor
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.image.outputs.local == 'true'
         with:
@@ -74,11 +93,8 @@ jobs:
         run: |
           if [[ $LOCAL == true ]]; then docker load -i "$RUNNER_TEMP/tools-image.tar"
           else echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin; fi
-      - name: Validate stacks and Terraform modules
-        env:
-          IMAGE: ${{ needs.image.outputs.image }}
-        run: |
-          docker run --rm -v "$PWD:$PWD" -w "$PWD" "$IMAGE" bash ./local/lab.sh check --init
+      - name: Validate stacks, OpenTofu modules and scripts
+        run: devbox run -- task test IMAGE=${{ needs.image.outputs.image }}
 
   deploy:
     needs: [image, validate]
@@ -91,25 +107,23 @@ jobs:
       matrix:
         include:
           - stack: customer1-aws-staging
-            start: start
-            workflows: customers/customer1/aws
-            deploy: deploy-staging-no-hook
-            destroy: destroy-staging-parallel
+            vars: CLOUD=aws CUSTOMER=customer1
           - stack: customer2-aws-staging
-            start: start
-            workflows: customers/customer2/aws
-            deploy: deploy-staging
-            destroy: ""
+            vars: CLOUD=aws CUSTOMER=customer2 KEEP=true
           - stack: customer1-azure-staging
-            start: start-azure
-            workflows: customers/customer1/azure
-            deploy: deploy-staging
-            destroy: destroy-staging
+            vars: CLOUD=azure CUSTOMER=customer1
     name: deploy (${{ matrix.stack }})
     env:
       IMAGE: ${{ needs.image.outputs.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # devbox.json: Task and the other developer tools, as in `devbox shell`.
+      - uses: jetify-com/devbox-install-action@05e954310554b6122a26b4880d69937f61b1eb2e # v0.16.0
+        with:
+          devbox-version: 0.18.4
+          enable-cache: true
+      - name: Check Docker versions
+        run: devbox run -- task doctor
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.image.outputs.local == 'true'
         with:
@@ -122,37 +136,9 @@ jobs:
         run: |
           if [[ $LOCAL == true ]]; then docker load -i "$RUNNER_TEMP/tools-image.tar"
           else echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin; fi
-      - name: Start tools container
-        # Host network: scripts reach Floci and k3s via localhost and Docker network IPs.
-        # Same workspace path: Compose bind mounts are resolved by the host daemon.
-        run: |
-          docker run -d --name tools --network host \
-            -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:$PWD" -w "$PWD" \
-            -e ATMOS_COMPONENTS_TERRAFORM_APPLY_AUTO_APPROVE=true \
-            "$IMAGE" sleep infinity
-      - name: Start emulator
-        run: docker exec tools bash ./local/lab.sh ${{ matrix.start }}
-      # lab.sh run keeps the console output and collects cluster logs into .local-runtime/logs on success or failure.
-      - name: Deploy
-        run: docker exec tools bash ./local/lab.sh run ${{ matrix.stack }} atmos workflow ${{ matrix.deploy }} -f ${{ matrix.workflows }}
-      - name: Check cluster
-        run: |
-          docker exec tools kubectl --kubeconfig .local-runtime/kubeconfig-${{ matrix.stack }}.yaml get pods -A
-          docker exec tools helm --kubeconfig .local-runtime/kubeconfig-${{ matrix.stack }}.yaml list -A
-      - name: Destroy
-        if: matrix.destroy != ''
-        run: docker exec tools bash ./local/lab.sh run ${{ matrix.stack }} atmos workflow ${{ matrix.destroy }} -f ${{ matrix.workflows }}
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: logs-${{ matrix.stack }}-attempt${{ github.run_attempt }}
-          path: .local-runtime/logs/*.tar.gz
-          if-no-files-found: ignore
-          retention-days: 14
+      # Taskfile.yml: emulator and tools container up, deploy workflow, cluster check, destroy workflow.
+      - name: Deploy and destroy on the emulator
+        run: devbox run -- task e2e IMAGE="$IMAGE" ${{ matrix.vars }}
       - name: Diagnostics
         if: failure()
-        run: |
-          docker ps -a
-          docker exec tools kubectl --kubeconfig .local-runtime/kubeconfig-${{ matrix.stack }}.yaml get pods -A -o wide || true
-          docker exec tools kubectl --kubeconfig .local-runtime/kubeconfig-${{ matrix.stack }}.yaml get events -A --sort-by=.lastTimestamp || true
+        run: devbox run -- task lab:diagnostics IMAGE="$IMAGE" ${{ matrix.vars }}

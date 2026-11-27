@@ -23,6 +23,13 @@ jobs:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # devbox.json: Task and the other developer tools, as in `devbox shell`.
+      - uses: jetify-com/devbox-install-action@05e954310554b6122a26b4880d69937f61b1eb2e # v0.16.0
+        with:
+          devbox-version: 0.18.4
+          enable-cache: true
+      - name: Check Docker versions
+        run: devbox run -- task doctor
 
       # The bundle, its tar parts and the pulled images need more than the runner's default free space.
       - name: Free disk space
@@ -30,19 +37,12 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
-      - name: Build tools image
-        run: docker build -t tools .
-
+      # Taskfile.yml: the tools image is built on the way.
       - name: Build bundle
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:$PWD" -w "$PWD" tools bash bundle/build.sh
+        run: devbox run -- task bundle
 
       - name: Pack
-        run: |
-          mkdir dist
-          tar -C .local-runtime -cf - bundle | split -b 1900M -d - dist/qcm-bundle.tar.part-
-          cp bundle/manifest.yaml dist/manifest.yaml
-          (cd dist && sha256sum -- * > SHA256SUMS)
-          ls -lh dist
+        run: devbox run -- task bundle:pack
 
       - name: Publish release
         env:
@@ -60,5 +60,6 @@ jobs:
           Then load it into Nexus: docs/vm-installation.md.
 
           EOF
-          docker run --rm -v "$PWD:$PWD" -w "$PWD" tools bash bundle/release-notes.sh >> notes.md
+          devbox run -- task bundle:notes
+          cat .local-runtime/release-notes.md >> notes.md
           gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "Bundle $TAG" --notes-file notes.md

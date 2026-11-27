@@ -5,8 +5,30 @@ exec > >(tee -a /var/log/nexus-install.log) 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get update
-apt-get -o DPkg::Lock::Timeout=180 install -y ca-certificates curl tar gzip procps
+# While the machine boots, another apt-get can hold the apt locks for minutes: in the Floci lab, Floci installs its
+# IMDS proxy and sshd with apt-get in parallel with this script, and every machine downloads ~80 MB of package lists.
+# apt-get update does not wait for the lists lock (apt 2.4 ignores DPkg::Lock::Timeout there), so this script waits
+# for it. One deadline covers both apt steps and stays inside the 20-minute readiness check of the component.
+apt_deadline=$((SECONDS + 600))
+# The Nexus download below has its own deadline, also counted from the start: it gets the time apt leaves.
+download_deadline=$((SECONDS + 840))
+apt_note=$SECONDS
+until apt-get update >/tmp/apt-update.log 2>&1; do
+  if [ "$SECONDS" -ge "$apt_deadline" ]; then
+    cat /tmp/apt-update.log
+    echo "nexus-install: apt-get update failed for 10 minutes (lock held by another apt-get or mirror unreachable, see above); giving up"
+    exit 1
+  fi
+  # Once a minute, say why it waits (apt names the process that holds the lock).
+  if [ "$SECONDS" -ge "$apt_note" ]; then
+    echo "nexus-install: waiting for apt-get update: $(grep -m1 '^E:' /tmp/apt-update.log || tail -1 /tmp/apt-update.log)"
+    apt_note=$((SECONDS + 60))
+  fi
+  sleep 5
+done
+cat /tmp/apt-update.log
+apt_left=$((apt_deadline - SECONDS))
+apt-get -o DPkg::Lock::Timeout=$((apt_left > 60 ? apt_left : 60)) install -y ca-certificates curl tar gzip procps
 
 NEXUS_VERSION="${nexus_version}"
 NEXUS_DIR="/opt/nexus-$NEXUS_VERSION"
@@ -19,9 +41,26 @@ if ! id nexus >/dev/null 2>&1; then
 fi
 
 if [ ! -d "$NEXUS_DIR" ]; then
-  curl --fail --location --retry 3 \
-    "https://download.sonatype.com/nexus/3/nexus-$NEXUS_VERSION-linux-x86_64.tar.gz" \
-    --output "$ARCHIVE"
+  NEXUS_URL="https://download.sonatype.com/nexus/3/nexus-$NEXUS_VERSION-linux-x86_64.tar.gz"
+  # The connection can drop mid-body (TLS eof, reset) or stall. This loop retries every error and each new curl run
+  # continues from the bytes already on disk (-C -). curl's own --retry is not used: with -C - it starts the retried
+  # transfer from byte 0 again. HTTP 416 means the file on disk is already complete. timeout bounds each curl run, so
+  # the whole download keeps one deadline (curl's --max-time would limit one attempt only).
+  rm -f "$ARCHIVE"
+  while :; do
+    download_left=$((download_deadline - SECONDS))
+    if [ "$download_left" -le 0 ]; then
+      echo "nexus-install: download of $NEXUS_URL did not finish before its deadline ($(stat -c %s "$ARCHIVE" 2>/dev/null || echo 0) bytes on disk); giving up"
+      exit 1
+    fi
+    if http_code=$(timeout "$download_left" curl --fail --location --continue-at - --speed-limit 1024 --speed-time 60 \
+      --write-out '%%{http_code}' "$NEXUS_URL" --output "$ARCHIVE"); then
+      break
+    fi
+    [ "$http_code" != 416 ] || break
+    echo "nexus-install: download interrupted at $(stat -c %s "$ARCHIVE" 2>/dev/null || echo 0) bytes; continuing in 5 s"
+    sleep 5
+  done
 
   tar -xzf "$ARCHIVE" -C /opt
   rm -f "$ARCHIVE"

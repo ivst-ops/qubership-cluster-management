@@ -1,351 +1,275 @@
-# First run with Floci on Windows
+# First run with Floci
 
-This guide explains what to install after cloning, which scripts to run, and how to deploy.
-Docker Desktop runs Floci and Kubernetes nodes. Atmos, Terraform, Helmfile, and preparation scripts run on Windows;
-Docker Desktop alone is not enough. There is no all-in-one project installer or operator-tools image yet.
+This guide explains what to install after cloning, which tasks to run, and how to deploy the local AWS or Azure lab.
+Docker runs Floci, its Kubernetes nodes, and the tools container; Atmos, OpenTofu, Helmfile, kubectl and the AWS CLI
+run inside that container, so they are not installed on the machine.
 
-The documented host is Windows x64 (Intel/AMD), PowerShell 7, and Docker Desktop with Linux containers.
-Azure startup uses the Windows certificate store. For the Bash-based Kubemarine workflow on Windows or Linux, see [VM installation](vm-installation.md).
-Cloud accounts, Azure CLI, gcloud, Java, Python, and a separate Kubernetes installation are not needed for these local labs.
+The documented host is a Linux shell with Docker: a Linux machine or VM, or Docker Engine inside WSL 2 on Windows
+(Docker Desktop with WSL integration also works). The tools image is built for the host platform, so x64 and arm64 both work.
+A Mac without local Docker runs the tasks on a Linux VM over SSH: [Docker on another machine](local-development.md#docker-on-another-machine).
+Cloud accounts, Azure CLI, gcloud, Java, Python, PowerShell, and a separate Kubernetes installation are not needed for
+these local labs. For the Kubemarine installation on VMs, see [VM installation](vm-installation.md).
 
 ## The complete sequence
 
 ```text
-Install tools once -> clone/open repository -> create local settings and review network access
-  -> Test-Project.ps1 -Initialize: download providers and validate, without deployment
-  -> Start-Local.ps1 OR Start-AzureLocal.ps1: start the selected emulator
-  -> Atmos deploy workflow: create customer infrastructure and applications
-  -> check Kubernetes and access applications
-  -> Atmos destroy workflow: delete customer resources
-  -> stop the selected emulator
+Install Docker and Devbox once -> clone the repository -> devbox shell -> review network access
+  -> task test: build the tools image, download providers and validate, without deployment
+  -> task lab:up [CLOUD=azure]: start the selected emulator and the tools container
+  -> task lab:deploy: the Atmos deploy workflow creates customer infrastructure and applications
+  -> task lab:check: check Kubernetes and access applications
+  -> task lab:destroy: the Atmos destroy workflow deletes customer resources
+  -> task lab:stop: stop the selected emulator
 ```
 
-Installing tools does not start the lab. Start does not call deploy. Stop does not call destroy.
-Choose AWS or Azure for your first run; starting both is not required.
+`task e2e` runs `lab:up` to `lab:destroy` as CI does, then `task lab:release` instead of `lab:stop` (`KEEP=true`
+skips destroy and release; a lab that existed before the run is kept). Installing tools does not start the lab. `lab:up` does not deploy,
+and `lab:stop` does not destroy. Choose AWS or Azure for your first run; starting both is not required.
 
-## 1. Docker Desktop, Git, and PowerShell
+## 1. Docker and Devbox
 
-If Docker Desktop is already installed and running, skip installation.
-Otherwise follow the [official Windows installation guide](https://docs.docker.com/desktop/setup/install/windows-install/)
-for supported Windows versions, virtualization, WSL 2, and any required restart.
-Start Docker Desktop manually, select Linux containers, and wait for the engine.
-Its built-in Kubernetes is not needed: Floci creates k3s itself.
-Allow enough RAM/disk for Kubernetes, applications, and AWS Nexus; Docker's minimum requirements alone are not a tested lab sizing guarantee.
+On Linux, install [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin. On Windows, run
+everything below in WSL 2, with Docker Engine installed inside the WSL distribution; see
+[Windows laptop (WSL 2)](local-development.md#windows-laptop-wsl-2) for WSL memory, the checkout location, VPN and proxy.
+[Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) with the WSL 2 backend and WSL
+integration for your distribution works as well; it needs
+Settings → Resources → Network → **Enable host networking**: the tools container uses the host network to reach
+Floci and the Kubernetes APIs. Its built-in Kubernetes is not needed: Floci creates k3s itself.
+Allow enough RAM and disk for Kubernetes, applications, and AWS Nexus; Docker's minimum requirements alone are not a
+tested lab sizing guarantee.
 
-```powershell
+```bash
 docker version
 docker info --format '{{.OSType}}'
 docker compose version
 ```
 
-Expected: Docker client/server available, OSType `linux`, Compose version printed. Compose is bundled with Docker Desktop.
-Do not install a second Docker daemon inside WSL for this guide.
+Expected: Docker client and server available, server version 28 or later and Compose 2.33.1 or later (the lab
+networks use `gw_priority`), OSType `linux`.
 
-Install Git and PowerShell 7 if absent, from your existing Windows terminal:
+Install [Devbox](https://www.jetify.com/devbox/docs/installing_devbox/) and Git if absent.
+`devbox shell` in the repository brings the developer tools from [devbox.json](../devbox.json): Task and the GitHub CLI.
 
-```powershell
-winget install --id Git.Git --exact --source winget
-winget install --id Microsoft.PowerShell --exact --source winget
-```
+## 2. The tools
 
-If winget is unavailable, use [Git for Windows](https://git-scm.com/install/windows) and
-[Microsoft's PowerShell installer](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell-on-windows).
-Finish installation, close the terminal, and open PowerShell 7 from Start. Run remaining commands there.
-Windows PowerShell 5.1 (`powershell.exe`) does not satisfy scripts requiring PowerShell 7 (`pwsh.exe`).
+| Tool | Version | Where |
+|---|---|---|
+| Task | 3.53.1 | `devbox shell` ([devbox.json](../devbox.json)) |
+| GitHub CLI (`gh`) | 2.104.0 | `devbox shell`: pull requests, issues and workflow runs ([signing in](#github-cli-sign-in)) |
+| Atmos | 1.234.1 | tools image ([Dockerfile](../Dockerfile)) |
+| OpenTofu | 1.13.9 (modules require >= 1.8.0) | tools image |
+| kubectl | 1.34.3 | tools image |
+| Helm, helm-diff | 4.3.1, 3.15.13 | tools image |
+| Helmfile | 1.8.1 | tools image |
+| AWS CLI | 2.37.9, 17 service models (`AWSCLI_SERVICES`) | tools image |
+| Kubemarine | 0.55.0 | tools image |
+| sops, age | 3.13.3, 1.3.2 | tools image |
+| crane, yq | 0.22.1, 4.53.6 | tools image |
 
-## 2. Install the deployment tools
+The Dockerfile pins the versions; a version change also needs the new `<TOOL>_SHA256_AMD64` and `_ARM64` build args,
+or the build fails. The first task that needs the tools builds the image, and a Dockerfile change rebuilds it.
+To add a tool or bump a version: [Extending the tools image](local-development.md#extending-the-tools-image).
+OpenTofu replaced Terraform in the image; for existing state see
+[upgrading an existing checkout](../README.md#upgrading-an-existing-checkout).
 
-These versions were observed on the development machine on 2026-10-28. They are a reproducibility baseline;
-arbitrary newer versions have not been tested with these Terraform providers and parallel workflows.
+### GitHub CLI sign-in
 
-| Tool | Tested version | Purpose | Windows x64 download |
-|---|---|---|---|
-| Atmos | 1.231.1-rc.0 | Stacks and workflows | [Executable](https://github.com/cloudposse/atmos/releases/download/v1.231.1-rc.0/atmos_1.231.1-rc.0_windows_amd64.exe) |
-| Terraform | 1.16.5 | Infrastructure | [ZIP](https://releases.hashicorp.com/terraform/1.16.5/terraform_1.16.5_windows_amd64.zip) |
-| kubectl | 1.34.3 | Kubernetes access | [Executable](https://dl.k8s.io/release/v1.34.3/bin/windows/amd64/kubectl.exe) |
-| Helm | 4.3.1 | Chart installation | [ZIP](https://get.helm.sh/helm-v4.3.1-windows-amd64.zip) |
-| Helmfile | 1.8.1 | Application releases | [tar.gz](https://github.com/helmfile/helmfile/releases/download/v1.8.1/helmfile_1.8.1_windows_amd64.tar.gz) |
-| AWS CLI | 2.37.9 | AWS API/EKS tokens; AWS lab only | [MSI](https://awscli.amazonaws.com/AWSCLIV2-2.37.9.msi) |
-| helm-diff | 3.15.13 | Helmfile change detection | Install after Helm below |
+`gh` keeps its token in `~/.config/gh/hosts.yml`, in plain text where the machine has no keyring (a headless VM or WSL),
+readable by every process of the user and by anything with access to the Docker socket. Keep the token narrow and
+short-lived:
 
-Install AWS CLI using its MSI if running AWS workflows. Create a per-user directory for the other tools:
+1. Create a fine-grained personal access token for this repository only (Contents, Pull requests and Issues: read and
+   write; Actions: read) with a short expiry; authorise it for the organisation if it enforces SSO.
+2. Sign in without the token reaching the shell history:
+   `read -rs T && printf %s "$T" | devbox run -- gh auth login --with-token && devbox run -- gh auth setup-git`.
+3. Afterwards: `devbox run -- gh auth logout --hostname github.com`, and delete the token on GitHub.
 
-```powershell
-$toolsDirectory = Join-Path $env:LOCALAPPDATA 'Qubership\bin'
-New-Item -ItemType Directory -Path $toolsDirectory -Force | Out-Null
-$toolsDirectory
-```
-
-Download and verify releases using the publishers' checksum/signature instructions. Place these executables in that directory:
-
-1. Rename the Atmos download to `atmos.exe`.
-2. Extract `terraform.exe` from its ZIP.
-3. Copy `kubectl.exe`.
-4. Extract `helm.exe` from Helm's `windows-amd64` subdirectory.
-5. Extract `helmfile.exe` from its tar.gz. Windows `tar` supports these archives; use the downloaded filename in an empty extraction directory.
-
-Add the directory to user PATH and the current session:
-
-```powershell
-$toolsDirectory = Join-Path $env:LOCALAPPDATA 'Qubership\bin'
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($toolsDirectory -notin @($userPath -split ';')) {
-    [Environment]::SetEnvironmentVariable('Path', "$toolsDirectory;$userPath", 'User')
-}
-$env:Path = "$toolsDirectory;$env:Path"
-```
-
-Reopen PowerShell after the AWS CLI installer to receive its PATH update.
-If Docker Desktop provides another kubectl, `Get-Command kubectl -All` shows which executable wins.
-Official installation/verification references: [Atmos](https://atmos.tools/install/),
-[Terraform](https://developer.hashicorp.com/terraform/install), [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl-windows/),
-[Helm](https://helm.sh/docs/intro/install/), [Helmfile](https://helmfile.readthedocs.io/en/latest/#installation),
-[AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
-
-### Install helm-diff and check the toolchain
-
-Once Git, PowerShell 7, and Helm are on PATH, run once:
-
-```powershell
-helm plugin install https://github.com/databus23/helm-diff --version v3.15.13 --verify=false
-helm plugin list
-helm diff version
-```
-
-For Helm 4, `--verify=false` explicitly skips plugin signature verification for this legacy Git installation;
-it does not disable TLS verification. URL/version refer to the upstream project.
-See [helm-diff installation](https://github.com/databus23/helm-diff#install). If already installed, inspect its version instead.
-
-```powershell
-$PSVersionTable.PSVersion
-Get-Command docker, git, pwsh, atmos, terraform, kubectl, helm, helmfile
-atmos version
-terraform version
-kubectl version --client
-helm version --short
-helmfile --version
-aws --version
-```
-
-Expected: PowerShell major version 7 or later and required tools found. Skip the AWS CLI check for Azure-only use.
-No manual Floci image download is needed: Compose pulls missing images when Start runs.
+The tools container does not see `~/.config/gh`: it mounts only the repository.
 
 ## 3. Get the repository and create settings
 
-If you already have a checkout, open PowerShell in its root and skip cloning.
-Otherwise run from the directory where you want it:
-
-```powershell
+```bash
 git clone https://github.com/Netcracker/qubership-cluster-management.git
-Set-Location qubership-cluster-management
+cd qubership-cluster-management
+devbox shell
+task doctor   # fails below Docker Engine 28 or Compose 2.33.1
 ```
 
-All remaining commands assume the repository root containing `atmos.yaml`. For AWS, create settings once:
+All remaining commands assume this shell in the repository root. For AWS, create settings once:
 
-```powershell
-if (-not (Test-Path -LiteralPath ./local/settings.json)) {
-    Copy-Item ./local/settings.example.json ./local/settings.json
-}
+```bash
+[ -f local/settings.json ] || cp local/settings.example.json local/settings.json
 ```
 
-Review endpoint, region, Docker subnet, and DNS. The AWS defaults use Docker subnet 172.18.0.0/16;
-check VPN/other-network conflicts. Compose fixed IPs must remain consistent with local settings.
+Review region and DNS servers; ports, network and addresses come from the lab environment that `task lab:up`
+leases for the checkout (`.local-runtime/lab.env`, `task lab:env`). The first lab on a host normally takes slot 0 and
+creates the Docker subnet 172.18.0.0/16. If a VPN, kind or another network already uses that subnet, `lab:up` prints
+"Slot 0 skipped" and leases slot 1 instead; to keep slot 0, run the first `task lab:up LAB_NET_PREFIX=172.28` (the
+network keeps those octets afterwards). Other slots use 10.99.N.0/24, with no override.
 
 ## 4. Network access, proxies, and providers
 
-Downloading Terraform itself and downloading its providers are separate operations. Terraform can be installed
-while `terraform init` cannot reach the registry or download server. Requests from restricted
-networks may receive HTTP 403; proxy, DNS, TLS, and connection errors have different causes.
-An existing provider cache does not prove a fresh machine can download providers.
+Downloading OpenTofu providers is separate from building the image. The providers come from the OpenTofu registry
+(`registry.opentofu.org`), which serves provider archives from GitHub releases (`github.com`,
+`objects.githubusercontent.com`); `registry.terraform.io` and `releases.hashicorp.com` are not used.
 
 | Setting | Purpose | Location |
 |---|---|---|
-| HTTPS_PROXY / HTTP_PROXY | External CLI requests through an available proxy | Calling terminal; Atmos component environment where overridden |
-| NO_PROXY | Direct access to local Floci/Kubernetes | Calling terminal and stack environment |
-| Docker Desktop proxy | Docker image downloads | Docker Desktop settings, separately from stack variables |
-| Terraform provider mirror | Alternative provider package source | Terraform CLI configuration, separately from project .tf files |
+| HTTPS_PROXY / HTTP_PROXY | External requests through an available proxy | The shell that runs `task`; Task passes them into the tools container |
+| NO_PROXY | Direct access to local Floci/Kubernetes | The stacks set it for their tools; keep the local addresses in the shell too |
+| Docker proxy | Image pulls and builds | Docker daemon or Docker Desktop settings, separately |
+| OpenTofu provider mirror | Alternative provider package source | OpenTofu CLI configuration, `TF_CLI_CONFIG_FILE` |
 
-The committed `http://127.0.0.1:12334` proxy belongs to the development machine. This repository does not supply it.
-Before deployment, review `env.HTTPS_PROXY` in:
+The stacks set no proxy: a proxy that one machine needs belongs to that machine's shell. If yours needs one:
 
-- `stacks/customers/customer1/aws/_defaults.yaml` for AWS;
-- `stacks/customers/customer1/azure/staging.yaml` for Azure.
-
-Remove that YAML entry if no proxy is needed, or replace it with your working proxy address.
-A terminal setting alone does not override a conflicting value explicitly set in the Atmos stack.
-Review inherited terminal proxy variables too. Configure Docker Desktop's proxy separately if image pulls need one.
-Do not commit proxy passwords. No proxy settings are changed automatically by this guide.
-
-The validation script runs Terraform directly, so its provider downloads use the calling terminal's environment,
-not the Atmos stack's env block. Set the same working proxy in that terminal before initialization.
-For the development machine's address, the commands are below; use them only if a proxy actually listens on that port,
-or replace the URL with your available proxy:
-
-```powershell
-$env:HTTPS_PROXY = 'http://127.0.0.1:12334'
-$env:HTTP_PROXY = $env:HTTPS_PROXY
+```bash
+export HTTPS_PROXY=http://proxy.example.internal:3128 HTTP_PROXY=http://proxy.example.internal:3128
+export NO_PROXY=localhost,127.0.0.1,::1,floci
 ```
 
-If no proxy is needed, remove stale values from this terminal instead:
-
-```powershell
-Remove-Item Env:HTTPS_PROXY, Env:HTTP_PROXY -ErrorAction SilentlyContinue
-```
-
-These commands affect this terminal and its children; they do not update other terminals or stack YAML.
-
-Keep local APIs bypassed in the calling terminal:
-
-```powershell
-$env:NO_PROXY = 'localhost,127.0.0.1,::1,floci'
-```
-
-The stack also defines NO_PROXY for its child tools. Do not add registry.terraform.io or releases.hashicorp.com
-to NO_PROXY when they must use your proxy. NO_PROXY does not unblock an external server; it prevents local API
-requests from being sent through that external proxy.
+Task forwards these variables, set or not, to every command in the tools container (`TOOLS_ENV` in
+[Taskfile.yml](../Taskfile.yml)). Do not add registry.opentofu.org or github.com to NO_PROXY when they must use your
+proxy: NO_PROXY does not unblock an external server; it keeps local API requests away from the external proxy.
+Do not commit proxy passwords.
 
 ### Optional provider mirror
 
-When direct downloads are unavailable, use an approved mirror. Yandex Cloud documents
-`https://terraform-mirror.yandexcloud.net/` in its [setup guide](https://yandex.cloud/en/docs/terraform/quickstart).
-Check coverage for the exact locked provider version and Windows platform. This changes the download source, not the deployment cloud.
+When direct downloads are unavailable, use an approved mirror that serves the `registry.opentofu.org` hostname
+in the [provider network mirror protocol](https://opentofu.org/docs/internals/provider-network-mirror-protocol/),
+for example an internal Nexus or Artifactory proxy. A mirror that only serves `registry.terraform.io/...` paths
+does not match these providers: in OpenTofu, `hashicorp/aws` means `registry.opentofu.org/hashicorp/aws`.
+Check coverage for the exact locked provider version and platform. This changes the download source, not the deployment cloud.
 
-On Windows, edit the current user's `%APPDATA%\terraform.rc`, not `terraform.rc.txt`.
-Merge with any existing configuration instead of overwriting it. For this project's HashiCorp providers:
+Write the CLI configuration inside the checkout (the tools container sees only that), for example
+`.local-runtime/tofu.rc`, replacing the URL with your mirror, and export
+`TF_CLI_CONFIG_FILE="$PWD/.local-runtime/tofu.rc"` in the devbox shell:
 
 ```hcl
 provider_installation {
   network_mirror {
-    url     = "https://terraform-mirror.yandexcloud.net/"
-    include = ["registry.terraform.io/hashicorp/*"]
+    url     = "https://mirror.example.internal/"
+    include = ["registry.opentofu.org/hashicorp/*"]
   }
   direct {
-    exclude = ["registry.terraform.io/hashicorp/*"]
+    exclude = ["registry.opentofu.org/hashicorp/*"]
   }
 }
 ```
 
 Exclusion prevents matching providers from also consulting the blocked origin.
-See [Terraform CLI configuration](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-installation)
-for mirror selection and the TF_CLI_CONFIG_FILE override; check that variable if the default config appears ignored.
-Provider sources stay hashicorp/aws, hashicorp/azurerm, hashicorp/google, and hashicorp/kubernetes.
+See [OpenTofu CLI configuration](https://opentofu.org/docs/cli/config/config-file/#provider-installation).
+Provider sources stay hashicorp/aws, hashicorp/azurerm, hashicorp/google, hashicorp/kubernetes, hashicorp/http,
+and hashicorp/external.
 Keep committed .terraform.lock.hcl files; do not delete locks or use init -upgrade just to bypass a download error.
 A missing mirror version or checksum mismatch needs investigation, not disabled integrity checks.
 
 `versions.tf` sets compatible version ranges; each root module's `.terraform.lock.hcl` records its selected versions
-and checksums. The current locks contain AWS 6.68.0 or 6.70.0 depending on the module, AzureRM 4.81.0,
-Google 7.46.2, and Kubernetes 3.4.0. Do not silently unify or upgrade them during machine setup.
-On 2026-10-28, the mirror metadata listed Windows amd64 archives for all five provider/version combinations.
-This metadata check is not a full clean-machine initialization or an availability guarantee for another network/date.
+and checksums for `registry.opentofu.org`.
+The lock files are the source of the provider versions; do not unify or upgrade them during machine setup.
 
 ### Diagnose download access
 
-These commands report connectivity/status and intentionally have finite timeouts:
+From the tools container, which uses the forwarded proxy, with finite timeouts:
 
-```powershell
-curl.exe -I --connect-timeout 10 --max-time 20 https://registry.terraform.io/.well-known/terraform.json
-curl.exe -I --connect-timeout 10 --max-time 20 https://releases.hashicorp.com/
+```bash
+task run -- curl -sSI --connect-timeout 10 --max-time 20 https://registry.opentofu.org/.well-known/terraform.json
 ```
 
-If using the mirror, inspect its AWS provider listing too:
-
-```powershell
-curl.exe --fail --connect-timeout 10 --max-time 20 https://terraform-mirror.yandexcloud.net/registry.terraform.io/hashicorp/aws/index.json
+```bash
+task run -- curl -sSI --connect-timeout 10 --max-time 20 https://github.com/opentofu/terraform-provider-aws/releases
 ```
 
-An accessible listing does not prove a particular archive exists. Terraform init is the final download check.
-Repeated 403 responses require a working download route/mirror; endless retries do not solve access denial.
-After fixing settings, rerun initialization without deleting state/locks.
+An accessible endpoint does not prove a particular archive exists. `tofu init` is the final download check.
+Repeated 403 responses require a working download route or mirror; endless retries do not solve access denial.
+After fixing settings, rerun the check without deleting state or locks.
 Provider mirrors do not cover Helm charts, Docker images, or Nexus installation downloads.
 
 ## 5. Run the configuration check
 
-After installing tools and reviewing network settings:
-
-```powershell
-atmos validate stacks
-pwsh -NoProfile -File ./local/scripts/Test-Project.ps1 -Initialize
+```bash
+task test
 ```
 
-Expected: `Configuration checks passed. No infrastructure changes were applied.`
-Initialize downloads providers for all modules and validates them; it does not start Docker or deploy customer resources.
+It builds the tools image when needed, validates the stacks, runs `tofu fmt`, `init` (no backend), `validate` and
+`tofu test` for every module, and checks the scripts and the operator Taskfile. It does not start the emulator or
+deploy anything. Providers are cached in `.local-runtime/tofu-plugins`, so later runs are faster.
 Resolve provider failures before deployment using the preceding section.
 Kubeconfigs, state, and emulator data are excluded from Git and are created later.
 
 ## 6. Start and deploy AWS customer1
 
-```powershell
-& ./local/scripts/Start-Local.ps1
-if ($LASTEXITCODE -ne 0) { throw 'AWS emulator startup failed.' }
-atmos workflow deploy-staging -f customers/customer1/staging-terraform
-if ($LASTEXITCODE -ne 0) { throw 'Deployment failed; inspect the reported workflow step.' }
+```bash
+task lab:up
+task lab:deploy
 ```
 
-Start creates the external network if absent, starts Floci/UI, and waits for emulator health.
-It does not deploy or wait for Argo CD/Nexus. The workflow creates infrastructure, prepares Kubernetes access,
-then runs Nexus/readiness and applications/ALB in parallel. Terraform uses -auto-approve.
-Nexus readiness is checked by the Terraform HTTP provider inside the same apply that creates its VM.
+`lab:up` starts Floci, its UI and the lab sidecar, waits for their health, and starts the tools container. It does not
+deploy or wait for Argo CD or Nexus. The workflow ([staging-terraform.yaml](../workflows/customers/customer1/staging-terraform.yaml))
+creates infrastructure, prepares Kubernetes access (`task -d local prepare` in the tools container), then runs
+Nexus/readiness and applications/ALB in parallel. OpenTofu applies are approved automatically.
+Nexus readiness is checked by the HTTP provider inside the same apply that creates its VM.
 First deployment includes downloads and Nexus installation, so completion can take time.
 
-```powershell
-kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-aws-staging.yaml get nodes
-kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-aws-staging.yaml get pods -A
-helm --kubeconfig ./.local-runtime/kubeconfig-customer1-aws-staging.yaml list -A
+```bash
+task lab:check
 ```
 
 Expected: Ready node, ready application pods, deployed Helm releases. A completed MinIO bucket Job is normal.
 Open http://localhost:4500 for Floci UI and http://argocd.localhost, http://kiali.localhost,
-http://minio.localhost, http://headlamp.localhost for applications. Nexus uses the dynamically published host port discovered inside Terraform; see the local development readiness section.
-Application login/token requirements still apply.
+http://minio.localhost, http://headlamp.localhost for applications (slot 0; another slot adds its ports, `task lab:env`:
+UI on QCM_LAB_UI_PORT, applications on http://argocd.localhost:QCM_LAB_ALB_PORT). Nexus uses the dynamically published host port
+discovered inside OpenTofu; see the local development readiness section. Application login/token requirements still apply.
+
+customer2 has its own workflow: `task lab:deploy CUSTOMER=customer2`.
 
 ## 7. Start and deploy Azure customer1
 
-Azure uses a separate Compose/API on port 4577; AWS Floci and Azure CLI are not required.
-Start trusts the emulator CA in the current Windows user's root store and starts the emulator only.
-For a fresh Azure environment with no existing cluster/state:
+Azure uses a separate Compose project and API on port 4577; AWS Floci and Azure CLI are not required.
+`lab:up` trusts the emulator CA in the tools container (`task -d local trust-azure`) and starts the emulator only.
+For a fresh Azure environment with no existing cluster or state:
 
-```powershell
-pwsh -NoProfile -File ./local/scripts/Start-AzureLocal.ps1
-if ($LASTEXITCODE -ne 0) { throw 'Azure emulator startup failed.' }
-atmos workflow deploy-staging -f customers/customer1/azure
-if ($LASTEXITCODE -ne 0) { throw 'Deployment failed; inspect the reported workflow step.' }
+```bash
+task lab:up CLOUD=azure
+task lab:deploy CLOUD=azure
 ```
 
 The stack records load-balancer backend IP 172.19.0.3; Docker can allocate another address on a new machine.
 After access preparation, compare the node's InternalIP with
 components.terraform.load-balancer.vars.backend_addresses.kubernetes in the Azure staging manifest:
 
-```powershell
-kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml get nodes -o wide
+```bash
+task run -- kubectl --kubeconfig .local-runtime/kubeconfig-customer1-azure-staging.yaml get nodes -o wide
 ```
 
 Update that local setting if different. Floci Azure LB does not forward traffic, regardless of this configuration.
 Before repeating infrastructure apply, inspect its plan: Floci AKS read-back omits properties and has caused replacement plans.
 With existing network state:
 
-```powershell
-atmos terraform plan kubernetes -s customer1-azure-staging -input=false
+```bash
+task run -- atmos terraform plan kubernetes -s customer1-azure-staging -input=false
 ```
 
 For an existing cluster, refresh access and apply applications/LB without reapplying Kubernetes:
 
-```powershell
-atmos workflow deploy-staging -f customers/customer1/azure --from-step access
-kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml get nodes
-kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml get pods -A
+```bash
+task run -- atmos workflow deploy-staging -f customers/customer1/azure --from-step access
 ```
 
-Run each port-forward in a separate terminal from the repository root:
-
-```powershell
-kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml -n argocd port-forward svc/argocd-server 18080:80
+```bash
+task lab:check CLOUD=azure
 ```
 
-```powershell
-kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml -n istio-system port-forward svc/kiali 18081:20001
+Run each port-forward in a separate terminal from the repository root (inside `devbox shell`):
+
+```bash
+task run -- kubectl --kubeconfig .local-runtime/kubeconfig-customer1-azure-staging.yaml -n argocd port-forward svc/argocd-server 18080:80
 ```
 
-Leave these running and open http://localhost:18080 and http://localhost:18081; both returned HTTP 200 in validation.
+```bash
+task run -- kubectl --kubeconfig .local-runtime/kubeconfig-customer1-azure-staging.yaml -n istio-system port-forward svc/kiali 18081:20001
+```
+
+The tools container uses the host network, so http://localhost:18080 and http://localhost:18081 open on the host.
 Ctrl+C ends that port-forward, not the application.
 GCP is an inactive template; no unverified GCP launch sequence is provided here.
 
@@ -353,48 +277,50 @@ GCP is an inactive template; no unverified GCP launch sequence is provided here.
 
 Keep Docker and the emulator running until deletion succeeds. AWS customer1:
 
-```powershell
-atmos workflow destroy-staging -f customers/customer1/staging-terraform
-if ($LASTEXITCODE -ne 0) { throw 'Deletion failed. Keep Floci running.' }
-pwsh -NoProfile -File ./local/scripts/Stop-Local.ps1
+```bash
+task lab:destroy
+task lab:stop
 ```
 
 Azure customer1:
 
-```powershell
-atmos workflow destroy-staging -f customers/customer1/azure
-if ($LASTEXITCODE -ne 0) { throw 'Deletion failed. Keep Floci Azure running.' }
-docker compose -f ./local/compose.azure.yml stop
+```bash
+task lab:destroy CLOUD=azure
+task lab:stop CLOUD=azure
 ```
 
-Terraform steps use -auto-approve. Kiali CR is deleted before its operator; applications/LB before Kubernetes/network.
-AWS parallel destroy and Azure destroy have been checked with dry-run, not real end-to-end deletion in this session.
-Stop retains state/data. Azure preserves AKS across emulator shutdowns, so destroy must come first.
-Do not delete state or Floci data as a substitute for resource deletion.
+OpenTofu applies are approved automatically. Kiali CR is deleted before its operator; applications/LB before
+Kubernetes/network. `lab:stop` retains state and data. Azure preserves AKS across emulator shutdowns, so destroy must
+come first. Do not delete state or Floci data as a substitute for resource deletion.
+To give the lab environment back to the Docker host (for example before removing a worktree), run `task lab:release`
+after the destroy: it also removes the persisted Floci data (`local/floci-data`, `local/floci-azure-data`).
+`task lab:list` shows the labs of the host.
 
 ## First-run troubleshooting
 
 | Symptom | Check / action |
 |---|---|
-| Command not found | Complete installation, reopen terminal, inspect PATH / Get-Command |
-| PowerShell version error | Use pwsh, not Windows PowerShell 5.1 |
-| Script blocked by execution policy | Review script and organization policy; use Microsoft's documented process-scoped options if appropriate |
-| Docker unavailable / wrong engine | Start Docker Desktop; select Linux containers |
-| settings.json missing | Copy the example before AWS Start |
-| Terraform init HTTP 403 | Review region/access restrictions, proxy, and mirror; retries alone do not fix denial |
-| Local API 502 / attempts to use port 12334 | Correct HTTPS_PROXY and keep local endpoints in NO_PROXY |
+| `task: command not found` | Run the commands inside `devbox shell` |
+| Docker unavailable / wrong engine | Start Docker; on Windows, Docker Engine inside this WSL distribution (`sudo systemctl start docker`) or Docker Desktop with WSL integration for it |
+| Tools container cannot reach localhost:4566 | Docker Desktop: enable host networking |
+| settings.json missing | Copy the example before `lab:up` |
+| Slot 0 skipped: subnet 172.18.0.0 is in use | Not an error: `lab:up` leased the next free slot. To keep slot 0 despite the other network, run the first `task lab:up LAB_NET_PREFIX=172.28`. A slot N whose 10.99.N.0/24 is taken is skipped the same way |
+| tofu init HTTP 403 | Review region/access restrictions, proxy, and mirror; retries alone do not fix denial |
+| Local API 502 / proxy errors for localhost | Keep local endpoints in NO_PROXY; check HTTPS_PROXY in the shell |
 | TLS errors | Review trusted certificates and corporate proxy CA; do not disable TLS verification as the default fix |
-| helm-diff missing | Install plugin and check helm diff version |
-| Port already allocated | Inspect containers/processes: AWS uses 80/4500/4566; Azure API 4577 and AKS ports in 6600–6699 |
+| Port already allocated | Inspect containers/processes: slot 0 uses 80/4500/4566, Azure API 4577, sidecars 4590/4591, EKS 6500–6599, AKS 6600–6699, EC2 SSH 2200–2299, EC2 security-group ports 30000–30999; other checkouts use their slot's ports (`task lab:env`, `task lab:list`, [parallel lab environments](local-development.md#parallel-lab-environments)) |
 | Docker Address already in use | Inspect networks; see recovery notes. Do not delete shared networks/state |
-| Kubeconfig missing | Deploy/access preparation creates it; Start alone does not |
+| Kubeconfig missing | Deploy/access preparation creates it; `lab:up` alone does not |
 | Azure LB IP does not open UI | Expected emulator limitation; use port forwarding |
 
 ## Verification scope
 
-Repository paths, workflow names, installed versions, configuration checks, and workflow dry-runs were checked.
-Earlier AWS/Azure deployments and Azure UI port-forward checks were performed. The complete installation sequence
-has not been run on a clean Windows VM; an already provisioned machine does not establish that result.
+`task test` and `task e2e` (emulator up, deploy, cluster check, destroy) for AWS customer1
+(workflow file `customers/customer1/staging-terraform`) and Azure customer1 (`CLOUD=azure`) were run on an arm64 Ubuntu
+24.04 VM. Three of them ran at the same time on one Docker host in lab environments 1–3 (AWS, AWS, Azure; see
+[parallel lab environments](local-development.md#parallel-lab-environments)), each a full `task e2e` through the image
+cache: about 35 minutes each with an empty cache, 10–12 minutes with a warm one. The Azure port-forward steps and the
+complete sequence on a clean Windows + WSL 2 machine have not been verified there.
 
-See [local development](local-development.md) for script internals/recovery, [architecture](architecture.md)
-for imports/values, and [five-page diagrams](diagrams/README.md) for visual explanations.
+See [local development](local-development.md) for internals and recovery, [architecture](architecture.md)
+for imports and values, and [five-page diagrams](diagrams/README.md) for visual explanations.

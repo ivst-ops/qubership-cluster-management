@@ -1,0 +1,513 @@
+# Developer and CI entry points (`task --list`). Run from `devbox shell`; infra tools run in the per-checkout tools
+# container (compose.yml), rebuilt by `tools:up` when the Dockerfile changes. Override with IMAGE= / LAB_NET_PREFIX=
+# or QCM_TOOLS_IMAGE / QCM_LAB_NET_PREFIX.
+#
+# Local labs: every checkout leases its own lab environment on the Docker host (`task lab:up` runs
+# local/lab-env.sh acquire): a slot whose Compose projects, host ports, lab network, customer environment names
+# (<name>-sN) and VPC ranges are its own, so parallel sessions and worktrees test side by side. The slot is kept in
+# .local-runtime/lab.env: Compose reads it (--env-file) and the tools container gets it in its environment.
+# QCM_LAB_* exported in the shell override that file, so leave them unset. LAB_NET_PREFIX applies to slot 0 only,
+# when its network is first created; slot N always uses 10.99.N.0/24.
+# `task lab:list` shows the labs of the host, `task lab:stop-all` stops all of them.
+#
+# Operator tasks (prepare, secrets, tunnel, Nexus, ...) are a separate Taskfile for the tools image, local/Taskfile.yml:
+# `task ops -- <task>`. Long Bash stays only where Task would be worse: local/lab.sh (stateful lab steps with jq),
+# bundle/*.sh (manifest-driven downloads) and local/lab/lab-api.sh (a CGI script inside the lab sidecar).
+version: '3'
+
+vars:
+  DEV_IMAGE: qcm-tools:dev
+  RELEASE_IMAGE: qcm-tools:local
+  LAB_IMAGE: qcm-floci-lab:local
+  # Small helper containers (cache warm-up, lab:release). Keep the digest of local/lab/Dockerfile, which Dependabot
+  # updates, and of docker_gid in local/lab-env.sh.
+  ALPINE_IMAGE: alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
+  # The tools container image: the local dev build by default; CI passes the image it built or published, which is not rebuilt.
+  IMAGE: '{{.QCM_TOOLS_IMAGE | default .DEV_IMAGE}}'
+  # One tools container (and Compose project) per checkout: a second checkout or worktree gets its own.
+  TOOLS:
+    sh: printf 'qcm-tools-%s' "$(printf '%s' '{{.ROOT_DIR}}' | cksum | cut -d' ' -f1)"
+  USER_ID: {sh: id -u}
+  GROUP_ID: {sh: id -g}
+  # The lab environment of this checkout (local/lab-env.sh); Compose reads it at each command, so a task that
+  # leased it a step earlier sees it.
+  LAB_ENV: .local-runtime/lab.env
+  TOOLS_COMPOSE: >-
+    QCM_ROOT='{{.ROOT_DIR}}' QCM_TOOLS_IMAGE='{{.IMAGE}}' QCM_TOOLS_NAME='{{.TOOLS}}'
+    QCM_UID='{{.USER_ID}}' QCM_GID='{{.GROUP_ID}}' docker compose
+    $(test -s {{.LAB_ENV}} && echo --env-file {{.LAB_ENV}}) -f compose.yml
+  # Host environment passed into the tools container when set (docker exec -e NAME forwards only variables that exist).
+  # The proxy for provider and chart downloads comes from here: the stacks set only NO_PROXY for the local endpoints.
+  TOOLS_ENV: >-
+    ATMOS_COMPONENTS_TERRAFORM_APPLY_AUTO_APPROVE TF_PLUGIN_CACHE_DIR TF_CLI_CONFIG_FILE AWS_PROFILE
+    HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy
+    SOPS_AGE_KEY SOPS_AGE_KEY_FILE SOPS_AGE_KEY_CMD BUNDLE_DIR BUNDLE_MANIFEST NEXUS_ENDPOINT_TIMEOUT
+  # Prefix that runs a command in the tools container (no stdin: it would swallow the caller's).
+  X: >-
+    docker exec{{range splitList " " .TOOLS_ENV}} -e {{.}}{{end}} -w "{{.ROOT_DIR}}" {{.TOOLS}}
+
+  # The local test environment: `task e2e CLOUD=azure`, `task lab:up CUSTOMER=customer2` and so on.
+  CLOUD: aws
+  CUSTOMER: customer1
+  STACK: '{{.CUSTOMER}}-{{.CLOUD}}-staging'
+  # customer1 AWS lives in staging-terraform.yaml; the other customers and clouds in <customer>/<cloud>.yaml.
+  WORKFLOWS: >-
+    {{if and (eq .CUSTOMER "customer1") (eq .CLOUD "aws")}}customers/customer1/staging-terraform{{else}}customers/{{.CUSTOMER}}/{{.CLOUD}}{{end}}
+  DEPLOY: deploy-staging
+  DESTROY: destroy-staging
+  # First two octets of the network of lab environment 0, aws-local_default (172.18.0.0/16 unless taken, e.g. by
+  # kind), when it is created; slots 1.. use 10.99.<slot>.0/24.
+  LAB_NET_PREFIX: '{{.QCM_LAB_NET_PREFIX | default "172.18"}}'
+  COMPOSE: >-
+    docker compose --env-file {{.LAB_ENV}}
+    -f {{if eq .CLOUD "azure"}}local/compose.azure.yml{{else}}local/compose.yml{{end}}
+  KUBECONFIG_FILE: .local-runtime/kubeconfig-{{.STACK}}.yaml
+
+  # Relative to the repository root; the scripts get the absolute path, which is the same in the tools container.
+  BUNDLE_DIR: .local-runtime/bundle
+  DIST: dist
+
+tasks:
+  default:
+    cmds: [task --list]
+    silent: true
+
+  doctor:
+    desc: 'Print the Docker and Compose versions; fail below Docker 28 or Compose 2.33.1 (the local lab needs them)'
+    cmds:
+      - docker version
+      - docker compose version
+      - |
+        old() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" != "$2" ]; }
+        engine=$(docker version -f '{{`{{.Server.Version}}`}}')
+        compose=$(docker compose version --short | sed 's/^v//')
+        old "$engine" 28.0.0 && { echo "Docker Engine $engine is too old: 28 or later is required." >&2; exit 1; }
+        old "$compose" 2.33.1 && { echo "Docker Compose $compose is too old: 2.33.1 or later is required." >&2; exit 1; }
+        echo "Docker Engine $engine and Compose $compose are supported."
+
+  # --- Images ------------------------------------------------------------------------------------------------
+
+  image:
+    desc: 'Build the tools image for this machine''s platform ({{.IMAGE}}); tool tasks do it on their own'
+    cmds:
+      - task: tools:build
+
+  tools:build:
+    internal: true
+    cmds:
+      - '{{.TOOLS_COMPOSE}} build --quiet tools'
+
+  image:release:
+    desc: 'Build the tools image for linux/amd64 ({{.RELEASE_IMAGE}}), what CI publishes'
+    cmds:
+      - docker buildx build --load --platform linux/amd64 -t {{.RELEASE_IMAGE}} {{.CLI_ARGS}} .
+
+  image:lab:
+    desc: 'Build the Floci lab sidecar ({{.LAB_IMAGE}}); `task lab:up` builds it too'
+    cmds:
+      - docker buildx build --load -t {{.LAB_IMAGE}} local/lab
+
+  image:all:
+    desc: Build the release tools image and the lab sidecar
+    deps: [image:release, image:lab]
+
+  # --- Tools container ---------------------------------------------------------------------------------------------
+
+  tools:up:
+    desc: Start the tools container of this checkout; rebuilds the tools image first when the Dockerfile changed
+    run: once
+    # Skipped while the container runs the expected image as this user and the image inputs are unchanged
+    # (checksums in .task/); otherwise the image is rebuilt (BuildKit cache for unchanged stages) and compose
+    # recreates the container when something changed.
+    sources: [Dockerfile, compose.yml]
+    status:
+      - >-
+        test "$(docker inspect -f '{{`{{.State.Running}} {{.Config.Image}} {{.Config.User}}`}}' {{.TOOLS}} 2>/dev/null)"
+        = "true {{.IMAGE}} {{.USER_ID}}:{{.GROUP_ID}}"
+      # The lab environment the container was created with: one leased or changed since recreates it.
+      - >-
+        test "$(docker inspect -f '{{`{{index .Config.Labels "qcm.lab.slot"}}`}}' {{.TOOLS}} 2>/dev/null)"
+        = "$(sed -n 's/^QCM_LAB_SLOT=//p' {{.LAB_ENV}} 2>/dev/null | grep . || echo none)"
+      # Files the container needs from the checkout: a fresh or cleaned .local-runtime runs tools:up again.
+      - test -s .local-runtime/ca-bundle.crt -a -s .local-runtime/tools/passwd -a -s .local-runtime/tools/group
+    vars:
+      ETC: .local-runtime/tools
+    cmds:
+      - mkdir -p .local-runtime/home {{.ETC}}
+      - task: tools:build
+        if: test "{{.IMAGE}}" = "{{.DEV_IMAGE}}"
+      - cmd: docker image inspect {{.IMAGE}} >/dev/null 2>&1 || docker pull -q {{.IMAGE}}
+        if: test "{{.IMAGE}}" != "{{.DEV_IMAGE}}"
+      # The image's passwd and group with an entry for this user: ssh and some tools need one for their uid.
+      - >-
+        mkdir -p {{.ETC}}/image &&
+        docker run --rm --entrypoint tar {{.IMAGE}} -C /etc -cf - passwd group | tar -C {{.ETC}}/image -xf -
+      - >-
+        { cat {{.ETC}}/image/passwd
+        {{if ne .USER_ID "0"}}| awk -F: '$3 != {{.USER_ID}}'; echo 'qcm:x:{{.USER_ID}}:{{.GROUP_ID}}:qcm:{{.ROOT_DIR}}/.local-runtime/home:/bin/bash'{{end}}; }
+        >{{.ETC}}/passwd.tmp && mv {{.ETC}}/passwd.tmp {{.ETC}}/passwd
+      - >-
+        { cat {{.ETC}}/image/group
+        {{if ne .GROUP_ID "0"}}| awk -F: '$3 != {{.GROUP_ID}}'; echo 'qcm:x:{{.GROUP_ID}}:'{{end}}; }
+        >{{.ETC}}/group.tmp && mv {{.ETC}}/group.tmp {{.ETC}}/group
+      - '{{.TOOLS_COMPOSE}} up -d --wait --no-build tools'
+      # SSL_CERT_FILE of the container: the image's CAs, plus the Floci Azure CA once trust-azure fetched it.
+      - '{{.X}} task -d local ca-bundle'
+
+  tools:shell:
+    desc: Open a shell in the tools container
+    interactive: true
+    deps: [tools:up]
+    cmds:
+      - '{{.X | replace "docker exec" "docker exec -it"}} bash'
+
+  tools:down:
+    desc: Remove the tools container (the checkout keeps all state)
+    cmds:
+      - '{{.TOOLS_COMPOSE}} down'
+
+  run:
+    desc: 'Run a command in the tools container: task run -- atmos describe stacks'
+    deps: [tools:up]
+    cmds:
+      # With stdin, for commands that read it.
+      - '{{.X | replace "docker exec" "docker exec -i"}} {{.CLI_ARGS}}'
+
+  ops:
+    desc: 'Run an operator task (local/Taskfile.yml) in the tools container: task ops -- prepare STACK=customer1-aws-staging'
+    deps: [tools:up]
+    cmds:
+      - '{{.X | replace "docker exec" "docker exec -i"}} task -d local {{.CLI_ARGS}}'
+
+  # --- Tests (no infrastructure changes) ---------------------------------------------------------------------
+
+  test:
+    desc: 'Static checks: Atmos stacks, OpenTofu format, init, validate and tests, shell syntax, operator Taskfile'
+    cmds:
+      - task: test:stacks
+      - task: test:modules
+      - task: test:scripts
+      - task: test:ops
+
+  test:stacks:
+    desc: Validate the Atmos stacks
+    deps: [tools:up]
+    cmds:
+      - '{{.X}} atmos validate stacks'
+
+  test:modules:
+    desc: 'OpenTofu fmt, then init (no backend), validate and `tofu test` per module in components/terraform'
+    deps: [tools:up]
+    vars:
+      MODULES:
+        sh: find components/terraform -name versions.tf -not -path '*/.terraform/*' -exec dirname {} \; | sort
+    cmds:
+      - mkdir -p .local-runtime/tofu-plugins
+      - '{{.X}} tofu fmt -check -recursive components/terraform'
+      - for: {var: MODULES}
+        task: test:module
+        vars: {MODULE: '{{.ITEM}}'}
+
+  test:module:
+    internal: true
+    label: 'test:module {{.MODULE}}'
+    env:
+      # Providers downloaded once for all modules (OpenTofu reads the TF_ variable). Set here: a called task
+      # does not inherit its caller's env.
+      TF_PLUGIN_CACHE_DIR: '{{.ROOT_DIR}}/.local-runtime/tofu-plugins'
+    cmds:
+      # Locks are part of the change under review: init must not rewrite them.
+      - '{{.X}} tofu -chdir={{.MODULE}} init -backend=false -input=false -lockfile=readonly -no-color >/dev/null'
+      - '{{.X}} tofu -chdir={{.MODULE}} validate -no-color'
+      - cmd: '{{.X}} tofu -chdir={{.MODULE}} test -no-color'
+        if: test -d {{.MODULE}}/tests
+
+  test:scripts:
+    desc: Check the syntax of the Bash scripts
+    deps: [tools:up]
+    vars:
+      SCRIPTS:
+        sh: git ls-files --cached --others --exclude-standard '*.sh' | sort
+    cmds:
+      - for: {var: SCRIPTS}
+        cmd: '{{.X}} bash -n {{.ITEM}}'
+
+  test:ops:
+    desc: Check that the operator Taskfile (local/Taskfile.yml) parses in the tools image
+    deps: [tools:up]
+    cmds:
+      - '{{.X}} task -d local --list >/dev/null'
+
+  test:render:
+    desc: 'Render the Helmfile components of STACK (default {{.STACK}}) without applying them'
+    deps: [tools:up]
+    cmds:
+      - for: [istio, argocd, kiali, minio, headlamp]
+        cmd: '{{.X}} atmos helmfile template {{.ITEM}} -s {{.STACK}} --skip-deps >/dev/null'
+
+  # --- Local test environment (Floci emulators) --------------------------------------------------------------
+
+  lab:up:
+    desc: 'Lease the lab environment of this checkout, start its emulator for CLOUD (aws|azure, default {{.CLOUD}}) and the tools container; data is kept between runs'
+    cmds:
+      # The lab sidecar accepts only requests with this token (local/lab/lab-api.sh).
+      - mkdir -p .local-runtime
+      # Task's built-in shell has no umask: create the file empty and private, then fill it.
+      - >-
+        test -s .local-runtime/lab-token ||
+        { : >.local-runtime/lab-token && chmod 600 .local-runtime/lab-token &&
+        head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' >.local-runtime/lab-token; }
+      # A free slot of this Docker host, or the one this checkout already has (its lab network is the lease; the
+      # network is external to Compose, so Floci's k3s and EC2 containers attached to it never block a Compose change).
+      - QCM_LAB_NET_PREFIX='{{.LAB_NET_PREFIX}}' bash local/lab-env.sh acquire
+      # The pull-through image cache shared by all labs of the host (local/compose.cache.yml); prepare points the
+      # k3s nodes at it. REGISTRY_CACHE=false leaves it out: the nodes then pull from the Internet.
+      - task: lab:cache
+        if: test "{{.REGISTRY_CACHE | default "true"}}" != false
+      - '{{.COMPOSE}} up -d --build --wait'
+      - task: tools:up
+      - task: lab:cache-warm
+        if: test "{{.REGISTRY_CACHE | default "true"}}" != false
+      - task: lab:trust
+
+  lab:cache:
+    desc: 'Start the image cache shared by all labs of the host; a running one is left as it is'
+    vars: &cache_vars
+      # Revision of this checkout's cache definition, kept as a label of the container (CACHE_FILE and CACHE_NAME are
+      # only overridden to try the tasks on a throwaway project).
+      CACHE_FILE: '{{.CACHE_FILE | default "local/compose.cache.yml"}}'
+      CACHE_NAME: '{{.CACHE_NAME | default "qcm-registry-cache"}}'
+      CACHE_REV:
+        sh: docker compose -f {{.CACHE_FILE | default "local/compose.cache.yml"}} config --no-interpolate | cksum | cut -d' ' -f1
+    cmds:
+      # Never recreated here: checkouts on other commits share it, and a recreate cuts the pulls of their running labs.
+      - QCM_CACHE_REV={{.CACHE_REV}} docker compose -f {{.CACHE_FILE}} up -d --wait --no-recreate
+      - cmd: >-
+          test -n "$(docker ps -q --filter 'name=^{{.CACHE_NAME}}$' --filter label=qcm.cache.rev={{.CACHE_REV}})" ||
+          echo "WARNING: the running image cache {{.CACHE_NAME}} was created from another {{.CACHE_FILE}} than this
+          checkout's. It is left as it is. When no lab is running, apply this checkout's with task lab:cache-recreate." >&2
+        silent: true
+
+  lab:cache-recreate:
+    desc: 'Recreate the shared image cache from this checkout (after a change of compose.cache.yml); FORCE=true despite running labs'
+    vars: *cache_vars
+    preconditions:
+      # Every lab runs the sidecar service "lab".
+      - sh: test "{{.FORCE}}" = true -o -z "$(docker ps -q --filter label=com.docker.compose.service=lab)"
+        msg: 'Labs are running on this Docker host (task lab:list): their pulls would break. Wait, or pass FORCE=true.'
+    cmds:
+      - QCM_CACHE_REV={{.CACHE_REV}} docker compose -f {{.CACHE_FILE}} up -d --wait --force-recreate
+
+  lab:cache-warm:
+    desc: 'Fetch the lab images through the image cache one at a time (lock of the Docker host), so parallel labs find them cached'
+    deps: [tools:up]
+    vars:
+      # One source: the application images of the offline bundle (app_images).
+      APP_IMAGES:
+        sh: '{{.X}} yq -r ".app_images[]" bundle/manifest.yaml'
+      # Update together with the k3s version of Floci (the image in local/compose.yml).
+      SYSTEM_IMAGES: >-
+        docker.io/rancher/mirrored-coredns-coredns:1.12.3 docker.io/rancher/mirrored-metrics-server:v0.8.0
+        docker.io/rancher/mirrored-pause:3.6
+      # Not Task: the lock is flock inside the container that fetches (local/cache-warm.sh), released when it ends.
+      WARM: >-
+        docker run --rm --network qcm-registry-cache_default -v qcm-registry-cache-lock:/lock
+        -v {{.ROOT_DIR}}/local/cache-warm.sh:/cache-warm.sh:ro
+        {{.ALPINE_IMAGE}} sh /cache-warm.sh
+    cmds:
+      # zot syncs an image from upstream when its tag is first asked for, and parallel first requests for one repository
+      # collide (minutes of waiting, failed syncs): one image at a time, the first lab warms and the others find it cached.
+      - for: {var: APP_IMAGES, split: "\n"}
+        cmd: '{{.WARM}} {{.ITEM}}'
+        ignore_error: true
+      - for: {var: SYSTEM_IMAGES, split: " "}
+        cmd: '{{.WARM}} {{.ITEM}}'
+        ignore_error: true
+
+  lab:trust:
+    internal: true
+    deps: [tools:up]
+    cmds:
+      # The azurerm provider must trust the emulator CA (SSL_CERT_FILE bundle in .local-runtime).
+      - cmd: '{{.X}} task -d local trust-azure'
+        if: test "{{.CLOUD}}" = azure
+
+  lab:required:
+    internal: true
+    cmds:
+      # The slot named in lab.env must still be this checkout's: a stale file must not stop or remove another lab.
+      - bash local/lab-env.sh check
+
+  lab:stop:
+    desc: 'Stop the emulator for CLOUD of this checkout; its data and the customer resources are kept'
+    deps: [lab:required]
+    cmds:
+      - '{{.COMPOSE}} stop'
+
+  lab:deploy:
+    desc: 'Run the DEPLOY workflow (default {{.DEPLOY}}) of CUSTOMER/CLOUD on the running emulator'
+    deps: [lab:required]
+    env:
+      ATMOS_COMPONENTS_TERRAFORM_APPLY_AUTO_APPROVE: 'true'
+    cmds:
+      - task: lab:trust
+      - '{{.X}} atmos workflow {{.DEPLOY}} -f {{.WORKFLOWS}}'
+
+  lab:check:
+    desc: 'Show the pods and Helm releases of STACK (default {{.STACK}})'
+    deps: [lab:required, tools:up]
+    cmds:
+      - '{{.X}} kubectl --kubeconfig {{.KUBECONFIG_FILE}} get pods -A'
+      - '{{.X}} helm --kubeconfig {{.KUBECONFIG_FILE}} list -A'
+
+  lab:destroy:
+    desc: 'Run the DESTROY workflow (default {{.DESTROY}}) of CUSTOMER/CLOUD'
+    deps: [lab:required]
+    env:
+      ATMOS_COMPONENTS_TERRAFORM_APPLY_AUTO_APPROVE: 'true'
+    preconditions:
+      - sh: grep -q '^  {{.DESTROY}}:' workflows/{{.WORKFLOWS}}.yaml
+        msg: 'There is no workflow {{.DESTROY}} in workflows/{{.WORKFLOWS}}.yaml (stack {{.STACK}}); pass CUSTOMER and CLOUD of the lab to destroy.'
+    vars:
+      # Counted on the host from the local state files of the lab stacks, not through the tools container: Task evaluates
+      # these vars before deps and cmds, so a stopped container would read as "nothing deployed". Lab only: real AWS runs
+      # destroy-staging directly. Clusters in the kubernetes state: with none there is nothing to remove inside a cluster.
+      CLUSTERS:
+        sh: >-
+          f=components/terraform/{{.CLOUD}}/kubernetes/terraform.tfstate.d/{{.STACK}}/terraform.tfstate;
+          if test -s "$f"; then grep -cE '"type": "(aws_eks_cluster|azurerm_kubernetes_cluster)"' "$f" || true; else echo 0; fi
+      # Managed resources in the network state: with none either, the stack was never deployed (the other components read
+      # the network state and fail without it).
+      NETWORKS:
+        sh: >-
+          f=components/terraform/{{.CLOUD}}/network/terraform.tfstate.d/{{.STACK}}/terraform.tfstate;
+          if test -s "$f"; then grep -c '"mode": "managed"' "$f" || true; else echo 0; fi
+    cmds:
+      - task: lab:trust
+      # The cluster is in the state but its kubeconfig is gone (.local-runtime deleted, another clone): write it again,
+      # the Helm releases must be removed before the cluster, or the cloud load balancers they made block the network.
+      # If the emulator no longer has that cluster (its data was removed), the state is stale: remove the stack's state.
+      - cmd: >-
+          {{.X}} task -d local {{if eq .CLOUD "azure"}}prepare-azure{{else}}prepare{{end}} STACK={{.STACK}} ||
+          { echo "The cluster of {{.STACK}} is in the OpenTofu state but prepare cannot reach it: remove the state of the stack if its lab is gone." >&2; false; }
+        if: test "{{.CLUSTERS}}" -gt 0 -a ! -s {{.KUBECONFIG_FILE}}
+      - cmd: '{{.X}} atmos workflow {{.DESTROY}} -f {{.WORKFLOWS}}'
+        if: test "{{.CLUSTERS}}" -gt 0
+      - cmd: 'echo "Nothing deployed in {{.STACK}} (no network and no cluster in the state): nothing to destroy."'
+        if: test "{{.CLUSTERS}}" -eq 0 -a "{{.NETWORKS}}" -eq 0
+      - cmd: |-
+          echo 'No cluster in the state of {{.STACK}}: skipping the services in the cluster.'
+          {{.X}} atmos workflow destroy-infra -f {{.WORKFLOWS}}
+        if: test "{{.CLUSTERS}}" -eq 0 -a "{{.NETWORKS}}" -gt 0
+      # Floci keeps a deleted cluster's k3s data in the volume floci-aws-[sN-]eks-<cluster>; a new cluster with the same
+      # name would reuse it and fail on the old node address. Remove such volumes once no container uses them.
+      - >-
+        docker volume ls -q --filter dangling=true | grep -E '^floci-aws-(s[0-9]+-)?eks-' | xargs -r docker volume rm >/dev/null
+
+  lab:diagnostics:
+    desc: Containers, pods and recent events, for a failed deployment
+    deps: [tools:up]
+    ignore_error: true
+    cmds:
+      - docker ps -a
+      - '{{.X}} kubectl --kubeconfig {{.KUBECONFIG_FILE}} get pods -A -o wide'
+      - '{{.X}} kubectl --kubeconfig {{.KUBECONFIG_FILE}} get events -A --sort-by=.lastTimestamp'
+
+  lab:env:
+    desc: 'Show the lab environment of this checkout: slot, Compose projects, network and host ports'
+    cmds:
+      - bash local/lab-env.sh show
+
+  lab:list:
+    desc: 'List the lab environments of this Docker host: slot, network, running containers, owning checkout'
+    cmds:
+      - bash local/lab-env.sh list
+
+  lab:stop-all:
+    desc: 'Stop every lab of this Docker host (all checkouts): emulators, k3s nodes, EC2 containers; data is kept'
+    cmds:
+      - bash local/lab-env.sh stop-all
+
+  lab:release:
+    desc: 'After lab:destroy: remove the emulators of this checkout and give its lab environment back to the host'
+    cmds:
+      # Checks the owner first, detaches the image cache, runs compose down for both clouds, removes what Floci made.
+      - bash local/lab-env.sh release
+      # Floci keeps its resources in these folders and starts them again on the next lab:up, then possibly under another
+      # slot: a released lab must not come back. Floci writes them as root, so a container removes them.
+      # Not while a container of this checkout's lab still runs: a lab from before the slots has no lab.env to release.
+      - cmd: >-
+          docker run --rm -v "{{.ROOT_DIR}}/local:/local"
+          {{.ALPINE_IMAGE}}
+          rm -rf /local/floci-data /local/floci-azure-data
+        if: test -z "$(docker ps -q --filter label=com.docker.compose.project.working_dir={{.ROOT_DIR}}/local)"
+      # Stale access files of the released lab: a kubeconfig whose CA is gone fails a later destroy with an x509 error, and
+      # a known_hosts entry of a node that no longer exists makes SSH refuse the next one at the same address.
+      - cmd: rm -f .local-runtime/kubeconfig-*.yaml .local-runtime/known_hosts-*
+        if: test -z "$(docker ps -q --filter label=com.docker.compose.project.working_dir={{.ROOT_DIR}}/local)"
+
+  e2e:
+    desc: 'What CI deploys: emulator up, DEPLOY, cluster check, DESTROY, then the lab it leased is released (KEEP=true keeps both). E.g. task e2e CLOUD=azure'
+    vars:
+      # A lab that exists before the run is not this run's to release.
+      HAD_LAB:
+        sh: if test -s {{.LAB_ENV}}; then echo true; else echo false; fi
+    cmds:
+      - defer: '{{if .EXIT_CODE}}echo "e2e failed: the lab of this checkout keeps running. task lab:diagnostics shows why; then task lab:destroy and task lab:release free it." >&2{{end}}'
+      - task: lab:up
+      - task: lab:deploy
+      - task: lab:check
+      - task: lab:destroy
+        if: test "{{.KEEP}}" != true
+      # Without this the emulator containers (Floci, UI, sidecar, registry) run on until someone stops them.
+      - task: lab:release
+        if: test "{{.KEEP}}" != true -a "{{.HAD_LAB}}" = false
+
+  # --- Offline bundle (docs/vm-installation.md) --------------------------------------------------------------
+
+  bundle:
+    desc: 'Build the Nexus bundle of bundle/manifest.yaml into {{.BUNDLE_DIR}} (needs Internet; re-runs skip what is there)'
+    cmds:
+      - task: bundle:fetch
+      - task: bundle:apt
+
+  bundle:fetch:
+    desc: Download Nexus, Kubemarine files, Helm charts and images (bundle/build.sh in the tools container)
+    deps: [tools:up]
+    env:
+      BUNDLE_DIR: '{{.ROOT_DIR}}/{{.BUNDLE_DIR}}'
+    cmds:
+      - '{{.X}} bash bundle/build.sh'
+
+  bundle:apt:
+    desc: Node packages from a clean container of the node OS (bundle/apt.sh)
+    preconditions:
+      - sh: test -s {{.BUNDLE_DIR}}/apt.env
+        msg: 'No {{.BUNDLE_DIR}}/apt.env: run task bundle:fetch first.'
+    sources: ['{{.BUNDLE_DIR}}/apt.env', bundle/apt.sh, bundle/compose.yml]
+    generates: ['{{.BUNDLE_DIR}}/apt/Packages']
+    env:
+      BUNDLE_APT_DIR: '{{.ROOT_DIR}}/{{.BUNDLE_DIR}}/apt'
+    cmds:
+      - docker compose --env-file {{.BUNDLE_DIR}}/apt.env -f bundle/compose.yml run --rm apt
+
+  bundle:notes:
+    desc: 'Write the GitHub release notes of the bundle to .local-runtime/release-notes.md (bundle/release-notes.sh)'
+    deps: [tools:up]
+    env:
+      BUNDLE_DIR: '{{.ROOT_DIR}}/{{.BUNDLE_DIR}}'
+    cmds:
+      # Task's shell does the redirect, so nothing but the notes reaches the file.
+      - '{{.X}} bash bundle/release-notes.sh > .local-runtime/release-notes.md'
+
+  bundle:pack:
+    desc: 'Pack the bundle for a GitHub release into {{.DIST}}: one tar in 1900 MiB parts (assets must be < 2 GiB)'
+    preconditions:
+      - sh: test -s {{.BUNDLE_DIR}}/apt/Packages
+        msg: 'The bundle is incomplete: run task bundle first.'
+    cmds:
+      - rm -rf {{.DIST}} && mkdir -p {{.DIST}}
+      - tar -C {{dir .BUNDLE_DIR}} -cf - {{base .BUNDLE_DIR}} | split -b 1900M -d - {{.DIST}}/qcm-bundle.tar.part-
+      - cp bundle/manifest.yaml {{.DIST}}/manifest.yaml
+      - cd {{.DIST}} && sha256sum -- * > SHA256SUMS
+      - ls -lh {{.DIST}}

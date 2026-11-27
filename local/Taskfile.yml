@@ -1,0 +1,158 @@
+# Operator tasks: run with the tools image (production), by operators and by the Atmos workflows.
+# Not the developer Taskfile (../Taskfile.yml, which runs on the host from `devbox shell`). From the repository root
+# in the tools container (`task tools:shell` on a workstation, or `task ops -- <task> ...` from devbox shell):
+#   task -d local --list
+#   task -d local prepare STACK=customer1-aws-staging
+#   task -d local secrets:exec STACK=<stack> -- atmos workflow deploy-vm -f <workflow>
+#
+# Multi-step SSH/jq logic lives in local/lab.sh.
+version: '3'
+
+vars:
+  REPO: '{{joinPath .TASKFILE_DIR ".."}}'
+  # The operator key in local/age.key, unless SOPS_AGE_KEY, SOPS_AGE_KEY_CMD or SOPS_AGE_KEY_FILE picks another source.
+  AGE:
+    sh: >-
+      [ -z "${SOPS_AGE_KEY:-}${SOPS_AGE_KEY_CMD:-}${SOPS_AGE_KEY_FILE:-}" ] && [ -f "{{.REPO}}/local/age.key" ]
+      && echo "SOPS_AGE_KEY_FILE={{.REPO}}/local/age.key" || true
+
+tasks:
+  default:
+    cmds: [task -d local --list]
+    silent: true
+
+  # --- Local Floci lab (after `task lab:up` on the host) -----------------------------------------------------
+
+  prepare:
+    desc: 'After the Kubernetes apply of a Floci AWS STACK: repair the k3s node, AWS profile and kubeconfig'
+    dir: '{{.REPO}}'
+    requires: {vars: [STACK]}
+    cmds:
+      - bash local/lab.sh prepare {{.STACK}}
+
+  prepare-azure:
+    desc: Write the kubeconfig of a Floci Azure STACK and wait for its nodes and DNS
+    dir: '{{.REPO}}'
+    requires: {vars: [STACK]}
+    cmds:
+      - bash local/lab.sh prepare-azure {{.STACK}}
+
+  trust-azure:
+    desc: 'Trust the TLS CA of the running Floci Azure (the azurerm provider must): adds it to the CA bundle'
+    dir: '{{.REPO}}'
+    vars:
+      CRT: .local-runtime/floci-azure.crt
+      # Floci Azure of this checkout's lab environment (QCM_LAB_AZURE_PORT in the tools container, local/lab-env.sh).
+      PORT: '{{.QCM_LAB_AZURE_PORT | default "4577"}}'
+    cmds:
+      - mkdir -p .local-runtime
+      - >-
+        timeout 60 sh -c 'until curl --noproxy "*" -fs --max-time 3 http://localhost:{{.PORT}}/_floci/tls-cert -o {{.CRT}}.tmp
+        && grep -q "BEGIN CERTIFICATE" {{.CRT}}.tmp; do sleep 2; done'
+        || { rm -f {{.CRT}}.tmp; echo 'Floci Azure TLS certificate is not available.' >&2; exit 1; }
+      - mv {{.CRT}}.tmp {{.CRT}}
+      - task: ca-bundle
+      - "echo 'Floci Azure is ready at https://localhost:{{.PORT}}; its CA is trusted through SSL_CERT_FILE.'"
+
+  ca-bundle:
+    desc: 'Write .local-runtime/ca-bundle.crt: the image CAs plus the Floci Azure CA if fetched (SSL_CERT_FILE of compose.yml)'
+    dir: '{{.REPO}}'
+    vars:
+      OUT: .local-runtime/ca-bundle.crt
+    cmds:
+      - mkdir -p .local-runtime
+      - >-
+        { cat /etc/ssl/certs/ca-certificates.crt;
+        if [ -s .local-runtime/floci-azure.crt ]; then cat .local-runtime/floci-azure.crt; fi; } >{{.OUT}}.tmp
+      - mv {{.OUT}}.tmp {{.OUT}}
+
+  # --- Secrets (secrets/README.md) ---------------------------------------------------------------------------
+
+  secrets:init:
+    desc: 'Create secrets/STACK.yaml (SSH key pair, Nexus password) encrypted for the keys in .sops.yaml'
+    dir: '{{.REPO}}'
+    requires: {vars: [STACK]}
+    vars:
+      FILE: secrets/{{.STACK}}.yaml
+      TMP: {sh: mktemp -d}
+    preconditions:
+      - sh: echo '{{.STACK}}' | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$'
+        msg: 'Invalid stack name: {{.STACK}}'
+      - sh: test ! -e {{.FILE}}
+        msg: '{{.FILE}} exists; edit it with: sops {{.FILE}}'
+    cmds:
+      - defer: rm -rf {{.TMP}}
+      - ssh-keygen -q -t ed25519 -N '' -C {{.STACK}} -f {{.TMP}}/id
+      - |
+        {
+          echo "TF_VAR_ssh_public_key: $(cat {{.TMP}}/id.pub)"
+          echo 'TF_VAR_ssh_private_key: |'; sed 's/^/  /' {{.TMP}}/id
+          echo "NEXUS_ADMIN_PASSWORD: $(head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
+        } | {{.AGE}} sops encrypt --filename-override {{.FILE}} --input-type yaml --output-type yaml /dev/stdin \
+          >{{.TMP}}/out || { echo 'Encryption failed; check the keys in .sops.yaml.' >&2; exit 1; }
+      - mv {{.TMP}}/out {{.FILE}}
+      - 'echo "Created {{.FILE}}. Add cloud credentials (environment variables) with: sops {{.FILE}}"'
+
+  secrets:exec:
+    desc: 'Run the command after -- with the decrypted secrets of STACK as environment variables (nothing on disk)'
+    dir: '{{.REPO}}'
+    interactive: true
+    requires: {vars: [STACK]}
+    preconditions:
+      - sh: echo '{{.STACK}}' | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$'
+        msg: 'Invalid stack name: {{.STACK}}'
+      - sh: test -f secrets/{{.STACK}}.yaml
+        msg: 'No secrets/{{.STACK}}.yaml; run: task -d local secrets:init STACK={{.STACK}}'
+      - sh: test -n "{{.CLI_ARGS}}"
+        msg: 'Usage: task -d local secrets:exec STACK=<stack> -- <command>'
+    cmds:
+      - '{{.AGE}} sops exec-env secrets/{{.STACK}}.yaml {{.CLI_ARGS | shellQuote}}'
+
+  # --- VM installation (docs/vm-installation.md); the SSH steps run under secrets:exec ------------------------
+
+  tunnel:
+    desc: SOCKS proxy 127.0.0.1:<tunnel_port> through the jump host into the private network of STACK
+    dir: '{{.REPO}}'
+    requires: {vars: [STACK]}
+    cmds:
+      - bash local/lab.sh tunnel {{.STACK}}
+
+  tunnel:stop:
+    desc: Stop the tunnel of STACK
+    requires: {vars: [STACK]}
+    preconditions:
+      - sh: echo '{{.STACK}}' | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$'
+        msg: 'Invalid stack name: {{.STACK}}'
+    cmds:
+      # The socket path of local/lab.sh tunnel_sock.
+      - ssh -S /tmp/qcm-tunnel-{{.STACK}}.sock -O exit tunnel 2>/dev/null || true
+      - echo 'Tunnel for {{.STACK}} stopped.'
+
+  nexus:install:
+    desc: Copy Nexus from the bundle to its VM through the jump host and start it
+    dir: '{{.REPO}}'
+    requires: {vars: [STACK]}
+    cmds:
+      - bash local/lab.sh nexus-install {{.STACK}}
+
+  nexus:load:
+    desc: Create the Nexus repositories and upload the bundle, through the tunnel
+    dir: '{{.REPO}}'
+    requires: {vars: [STACK]}
+    cmds:
+      - bash local/lab.sh nexus-load {{.STACK}}
+
+  prepare-vms:
+    desc: 'After kubemarine: kubeconfig from the first control plane of STACK, its API reached through the tunnel'
+    dir: '{{.REPO}}'
+    requires: {vars: [STACK]}
+    cmds:
+      - bash local/lab.sh prepare-vms {{.STACK}}
+
+  ssh:
+    desc: 'A shell, or the command after --, on a private VM (HOST=<private address>) of STACK through the jump host'
+    dir: '{{.REPO}}'
+    interactive: true
+    requires: {vars: [STACK, HOST]}
+    cmds:
+      - bash local/lab.sh ssh {{.STACK}} {{.HOST}} {{.CLI_ARGS}}

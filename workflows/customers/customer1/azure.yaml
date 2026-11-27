@@ -9,7 +9,7 @@ workflows:
         command: terraform apply kubernetes -input=false -auto-approve
       - name: access
         type: shell
-        command: pwsh -NoProfile -File ./local/scripts/Prepare-AzureCluster.ps1 -Stack customer1-azure-staging
+        command: task -d local prepare-azure STACK=customer1-azure-staging
       - name: istio
         command: helmfile apply istio
       - name: argocd
@@ -28,9 +28,24 @@ workflows:
     steps:
       - name: load-balancer
         command: terraform destroy load-balancer -input=false -auto-approve
+      - name: services
+        command: workflow destroy-services -f customers/customer1/azure
+      - name: kubernetes
+        command: terraform destroy kubernetes -input=false -auto-approve
+      - name: network
+        command: terraform destroy network -input=false -auto-approve
+  destroy-services:
+    description: Remove the Kiali instance and the Helm releases in the cluster (task lab:destroy skips it when the state holds no cluster)
+    stack: customer1-azure-staging
+    steps:
       - name: kiali-instance
         type: shell
-        command: kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml delete kiali kiali -n istio-system --ignore-not-found=true --wait=true --timeout=180s
+        # Without the Kiali CRD (a deploy that stopped before kiali) there is nothing to delete; --ignore-not-found does
+        # not cover a missing resource type. An API error still fails the step.
+        command: >-
+          crd=$(kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml get crd kialis.kiali.io --ignore-not-found -o name)
+          && { [ -z "$crd" ] || kubectl --kubeconfig ./.local-runtime/kubeconfig-customer1-azure-staging.yaml
+          delete kiali kiali -n istio-system --ignore-not-found=true --wait=true --timeout=180s; }
       - name: headlamp
         command: helmfile destroy headlamp
       - name: minio
@@ -41,7 +56,9 @@ workflows:
         command: helmfile destroy argocd
       - name: istio
         command: helmfile destroy istio
-      - name: kubernetes
-        command: terraform destroy kubernetes -input=false -auto-approve
+  destroy-infra:
+    description: Remove the network of a stack without a cluster (task lab:destroy runs it when the state holds none)
+    stack: customer1-azure-staging
+    steps:
       - name: network
         command: terraform destroy network -input=false -auto-approve

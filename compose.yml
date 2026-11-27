@@ -1,0 +1,40 @@
+# The tools container of Taskfile.yml; start it with `task tools:up`, which passes the QCM_* values.
+# Same-path mount and host network, so paths and localhost ports match the host (Docker Desktop: enable host networking).
+name: ${QCM_TOOLS_NAME:?start the tools container with task}
+services:
+  tools:
+    build:
+      context: .
+    # CI passes the image it built or published (and Task starts it without building).
+    image: ${QCM_TOOLS_IMAGE:-qcm-tools:dev}
+    container_name: ${QCM_TOOLS_NAME}
+    user: ${QCM_UID:-0}:${QCM_GID:-0}
+    network_mode: host
+    init: true
+    working_dir: ${QCM_ROOT:?start the tools container with task}
+    # The lab environment of this checkout (.local-runtime/lab.env, local/lab-env.sh), when it has one: the stacks
+    # (environment names, endpoints, VPC ranges) and local/lab.sh read it. tools:up recreates the container when the
+    # slot changes.
+    labels:
+      qcm.lab.slot: ${QCM_LAB_SLOT:-none}
+    environment:
+      HOME: ${QCM_ROOT}/.local-runtime/home
+      # The image's CAs plus the Floci Azure CA once `task -d local trust-azure` fetched it (no root needed).
+      # Go and OpenSSL read SSL_CERT_FILE; the AWS CLI and Python requests read their own variables.
+      # tools:up writes the bundle right after the start, and again whenever it is missing.
+      SSL_CERT_FILE: ${QCM_ROOT}/.local-runtime/ca-bundle.crt
+      AWS_CA_BUNDLE: ${QCM_ROOT}/.local-runtime/ca-bundle.crt
+      REQUESTS_CA_BUNDLE: ${QCM_ROOT}/.local-runtime/ca-bundle.crt
+      QCM_LAB_SLOT: ${QCM_LAB_SLOT:-}
+      QCM_LAB_SUFFIX: ${QCM_LAB_SUFFIX:-}
+      QCM_LAB_NETWORK: ${QCM_LAB_NETWORK:-}
+      QCM_LAB_AWS_PORT: ${QCM_LAB_AWS_PORT:-}
+      QCM_LAB_API_PORT: ${QCM_LAB_API_PORT:-}
+      QCM_LAB_AZURE_PORT: ${QCM_LAB_AZURE_PORT:-}
+      QCM_LAB_AZURE_API_PORT: ${QCM_LAB_AZURE_API_PORT:-}
+      QCM_LAB_NAMESPACE: ${QCM_LAB_NAMESPACE:-}
+    volumes:
+      - ${QCM_ROOT}:${QCM_ROOT}
+      - ${QCM_ROOT}/.local-runtime/tools/passwd:/etc/passwd:ro
+      - ${QCM_ROOT}/.local-runtime/tools/group:/etc/group:ro
+    command: ["sleep", "infinity"]
