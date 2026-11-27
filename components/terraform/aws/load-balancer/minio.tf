@@ -68,5 +68,6 @@ resource "aws_lb_listener_rule" "minio_console" {
 }
 
 output "minio_console_node_port" {
-  value = local.minio_console_node_port
+  description = "Node port that the load balancer forwards to the MinIO console"
+  value       = local.minio_console_node_port
 }

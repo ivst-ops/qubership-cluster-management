@@ -69,5 +69,6 @@ locals {
 }
 
 output "argocd_node_port" {
-  value = local.argocd_node_port
+  description = "Node port that the load balancer forwards to Argo CD"
+  value       = local.argocd_node_port
 }

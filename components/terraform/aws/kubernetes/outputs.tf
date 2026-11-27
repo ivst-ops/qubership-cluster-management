@@ -4,12 +4,12 @@ output "cluster_name" {
 }
 
 output "cluster_endpoint" {
-  description = "Kubernetes API endpoint"
+  description = "Kubernetes API endpoint of the cluster"
   value       = aws_eks_cluster.main.endpoint
 }
 
 output "cluster_ca_data" {
-  description = "Certificate authority data in base64 format"
+  description = "Certificate authority data of the cluster, base64"
   value       = aws_eks_cluster.main.certificate_authority[0].data
 }
 output "oidc_provider_arn" {

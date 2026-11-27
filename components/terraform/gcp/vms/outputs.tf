@@ -1,5 +1,6 @@
 # Same output in every <cloud>/vms component; the kubemarine component and local/lab.sh consume it.
 output "vms" {
+  description = "The created VMs: name, roles, address (public or private, by `public`) and internal address"
   value = [
     for name, vm in var.vms : {
       name             = name

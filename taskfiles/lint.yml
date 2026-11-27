@@ -14,10 +14,11 @@ vars:
 
 tasks:
   default:
-    desc: 'Quality gate: tflint, Trivy (misconfiguration and secrets), yamllint, identical module copies; changes nothing'
+    desc: 'Quality gate: tflint, Trivy (misconfiguration and secrets), yamllint, identical module copies, leak scan, README check; changes nothing'
     cmds:
       - task: copies
       - task: leaks
+      - task: docs
       - task: tflint
       - task: trivy
       - task: yamllint
@@ -51,6 +52,11 @@ tasks:
           echo "lint:leaks: names from {{.LEAK_EXTRA_PATTERNS}} in the working tree"; exit 1; fi
         if: test -n '{{.LEAK_EXTRA_PATTERNS}}'
 
+  docs:
+    desc: 'README of every component and module: present, with a hand-written purpose, and equal to a fresh generation (task docs:check)'
+    cmds:
+      - task: :docs:check
+
   tflint:
     desc: tflint over components/terraform and providers (bundled terraform ruleset, .tflint.hcl)
     cmds:
@@ -70,4 +76,5 @@ tasks:
   pull:
     desc: Pull the scanner images into the local Docker (before going offline; mirroring into Nexus is separate)
     cmds:
-      - docker compose -f compose.lint.yml pull
+      - docker compose -f compose.lint.yml pull --ignore-buildable
+      - docker compose -f compose.lint.yml build --pull docs-check

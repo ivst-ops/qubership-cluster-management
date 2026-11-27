@@ -1,37 +1,38 @@
 variable "cloud" {
-  description = "Cloud identifier supplied by Atmos as deployment context"
+  description = "Cloud identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
 variable "stage" {
-  description = "Name of the stage from Atmos"
+  description = "Stage name, passed by Atmos from the stack context"
   type        = string
 }
 
 variable "tenant" {
-  description = "Customer identifier supplied by Atmos"
+  description = "Customer identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
 variable "environment" {
-  description = "Name of the environment"
+  description = "Environment name; the names of the created resources start with it"
   type        = string
 }
 
 variable "subnet_ids" {
-  description = "IDs of the subnets for the cluster"
+  description = "IDs of the subnets, by subnet key"
   type        = map(string)
 }
 
 variable "region" {
-  type    = string
-  default = "us-east-1"
+  description = "AWS region of the resources"
+  type        = string
+  default     = "us-east-1"
 }
 
 variable "local_endpoint" {
-  description = "Floci endpoint; null uses the real AWS APIs and normal credential chain"
+  description = "Floci endpoint of the local lab; null uses the real cloud APIs and the normal credential chain"
   type        = string
   default     = null
 }
@@ -48,7 +49,7 @@ variable "public_access_cidrs" {
 }
 
 variable "kubernetes_version" {
-  description = "Kubernetes minor version of the cluster, e.g. \"1.34\"; null takes the EKS default"
+  description = "Kubernetes minor version of the cluster, for example `\"1.34\"`; null takes the EKS default"
   type        = string
   default     = null
 }
@@ -74,7 +75,7 @@ variable "access_entries" {
 }
 
 variable "addons" {
-  description = "EKS managed add-ons by name. before_nodes: installed with the cluster (CNI, kube-proxy), otherwise after the node groups. irsa_role: a key of irsa_roles"
+  description = "EKS managed add-ons by name. `before_nodes`: installed with the cluster (CNI, kube-proxy), otherwise after the node groups. `irsa_role`: a key of `irsa_roles`"
   type = map(object({
     version                     = optional(string)
     configuration_values        = optional(any, {})
@@ -87,7 +88,7 @@ variable "addons" {
 }
 
 variable "irsa_enabled" {
-  description = "Create the OIDC provider of the cluster and the roles of irsa_roles"
+  description = "Create the OIDC provider of the cluster and the roles of `irsa_roles`"
   type        = bool
   default     = false
 }
@@ -129,7 +130,7 @@ variable "node_group_defaults" {
 }
 
 variable "node_groups" {
-  description = "Managed node groups by short name. subnets: keys of subnet_ids (all when empty). additional_volumes: dedicated EBS volumes (for example for the container runtime and the kubelet). Empty (default): no node groups"
+  description = "Managed node groups by short name. `subnets`: keys of `subnet_ids` (all when empty). `additional_volumes`: dedicated EBS volumes (for example for the container runtime and the kubelet). Empty (default): no node groups"
   type = map(object({
     instance_type              = optional(string)
     min_size                   = optional(number)

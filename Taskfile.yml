@@ -195,6 +195,7 @@ tasks:
       - task: test:modules
       - task: test:scripts
       - task: test:ops
+      - task: test:docs
 
   test:stacks:
     desc: Validate the Atmos stacks
@@ -245,6 +246,27 @@ tasks:
     deps: [tools:up]
     cmds:
       - '{{.X}} task -d local --list >/dev/null'
+
+  test:docs:
+    desc: 'docs:check rejects a README without a hand-written purpose (a copy of one module, the checkout is not touched)'
+    vars:
+      COPY: '{{.ROOT_DIR}}/.local-runtime/docs-test'
+      MODULE: providers/aws/modules/eks-addons
+      RUN: >-
+        docker run --rm --network none -v '{{.ROOT_DIR}}/.local-runtime/docs-test:/src:ro' -w /src qcm-docs-lint:local
+        sh docs/docs-lint/docs.sh check
+    cmds:
+      - docker compose -f compose.lint.yml build --quiet docs-check
+      - defer: rm -rf '{{.COPY}}'
+      - rm -rf '{{.COPY}}' && mkdir -p '{{.COPY}}/docs/docs-lint' '{{.COPY}}/components/terraform' '{{.COPY}}/components/helmfile' '{{.COPY}}/{{.MODULE}}'
+      - cp .terraform-docs.yml '{{.COPY}}/' && cp docs/deps.yq docs/helmfile-params.yq '{{.COPY}}/docs/' && cp docs/docs-lint/docs.sh '{{.COPY}}/docs/docs-lint/'
+      - cp -R stacks '{{.COPY}}/' && tar -C '{{.MODULE}}' --exclude=.terraform -cf - . | tar -C '{{.COPY}}/{{.MODULE}}' -xf -
+      # The copy as it is passes; with the purpose paragraph removed (title and generated block kept) it must fail.
+      - '{{.RUN}} >/dev/null'
+      - awk 'NR == 1 {print; next} /^<!-- BEGIN_TF_DOCS -->/ {k = 1} k' '{{.MODULE}}/README.md' > '{{.COPY}}/{{.MODULE}}/README.md'
+      - >-
+        out=$({{.RUN}} 2>&1) && { echo "test:docs: docs:check accepted a README without a purpose"; exit 1; };
+        echo "$out" | grep -q 'hand-written purpose' || { echo "$out"; exit 1; }; echo "test:docs: ok"
 
   test:render:
     desc: 'Render the Helmfile components of STACK (default {{.STACK}}) without applying them'

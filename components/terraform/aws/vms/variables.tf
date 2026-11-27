@@ -1,21 +1,24 @@
 variable "cloud" {
-  description = "Cloud identifier supplied by Atmos as deployment context"
+  description = "Cloud identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
 variable "tenant" {
-  type    = string
-  default = null
+  description = "Customer identifier, passed by Atmos from the stack context"
+  type        = string
+  default     = null
 }
 
 variable "stage" {
-  type    = string
-  default = null
+  description = "Stage name, passed by Atmos from the stack context"
+  type        = string
+  default     = null
 }
 
 variable "environment" {
-  type = string
+  description = "Environment name; the names of the created resources start with it"
+  type        = string
 }
 
 variable "name" {
@@ -24,16 +27,18 @@ variable "name" {
 }
 
 variable "vpc_id" {
-  type = string
+  description = "ID of the VPC of the VMs"
+  type        = string
 }
 
 variable "subnet_ids" {
-  description = "Subnet IDs by key, as output by the network component"
+  description = "IDs of the subnets, by subnet key"
   type        = map(string)
 }
 
 variable "ami_id" {
-  type = string
+  description = "ID of the machine image of the VMs"
+  type        = string
 }
 
 variable "ssh_public_key" {
@@ -58,7 +63,7 @@ variable "public" {
 }
 
 variable "ports" {
-  description = "TCP ports open to allowed_cidrs"
+  description = "TCP ports open to `allowed_cidrs`"
   type        = list(number)
   default     = [22]
 }
@@ -69,12 +74,13 @@ variable "allowed_cidrs" {
 }
 
 variable "region" {
-  type    = string
-  default = "us-east-1"
+  description = "AWS region of the resources"
+  type        = string
+  default     = "us-east-1"
 }
 
 variable "local_endpoint" {
-  description = "Floci endpoint; null uses the real AWS APIs and normal credential chain"
+  description = "Floci endpoint of the local lab; null uses the real cloud APIs and the normal credential chain"
   type        = string
   default     = null
 }

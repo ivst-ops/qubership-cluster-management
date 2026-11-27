@@ -1,47 +1,56 @@
 variable "cloud" {
-  description = "Cloud identifier supplied by Atmos as deployment context"
+  description = "Cloud identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
 variable "tenant" {
-  type = string
+  description = "Customer identifier, passed by Atmos from the stack context"
+  type        = string
 }
 
 variable "stage" {
-  type = string
+  description = "Stage name, passed by Atmos from the stack context"
+  type        = string
 }
 
 variable "environment" {
-  type = string
+  description = "Environment name; the names of the created resources start with it"
+  type        = string
 }
 
 variable "vpc_id" {
-  type = string
+  description = "ID of the VPC of the Nexus VM"
+  type        = string
 }
 
 variable "subnet_id" {
-  type = string
+  description = "ID of the subnet of the Nexus VM"
+  type        = string
 }
 
 variable "ami_id" {
-  type = string
+  description = "ID of the machine image of the Nexus VM"
+  type        = string
 }
 
 variable "instance_type" {
-  type = string
+  description = "EC2 instance type of the Nexus VM"
+  type        = string
 }
 
 variable "nexus_version" {
-  type = string
+  description = "Nexus Repository version installed on the VM"
+  type        = string
 }
 variable "region" {
-  type    = string
-  default = "us-east-1"
+  description = "AWS region of the resources"
+  type        = string
+  default     = "us-east-1"
 }
 
 variable "local_endpoint" {
-  description = "Floci endpoint; null uses the real AWS APIs and normal credential chain"
+  description = "Floci endpoint of the local lab; null uses the real cloud APIs and the normal credential chain"
   type        = string
   default     = null
 }

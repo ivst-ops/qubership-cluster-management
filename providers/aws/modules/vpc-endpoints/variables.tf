@@ -4,7 +4,7 @@ variable "name" {
 }
 
 variable "region" {
-  description = "AWS region; service names default to com.amazonaws.<region>.<key>"
+  description = "AWS region; service names default to `com.amazonaws.<region>.<key>`"
   type        = string
 }
 
@@ -31,7 +31,7 @@ variable "route_table_ids" {
 }
 
 variable "endpoints" {
-  description = "Endpoints by service key (ecr.api, ecr.dkr, s3, sts, ec2, ...). service_name overrides com.amazonaws.<region>.<key>"
+  description = "Endpoints by service key (`ecr.api`, `ecr.dkr`, `s3`, `sts`, `ec2`, ...). `service_name` overrides `com.amazonaws.<region>.<key>`"
   type = map(object({
     type                = optional(string, "Interface")
     service_name        = optional(string)

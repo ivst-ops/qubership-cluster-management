@@ -71,5 +71,6 @@ locals {
 
 // Выводим NodePort сервиса Kiali.
 output "kiali_node_port" {
-  value = local.kiali_node_port
+  description = "Node port that the load balancer forwards to Kiali"
+  value       = local.kiali_node_port
 }

@@ -38,6 +38,24 @@ services:
         trivy config -q --config=/src/trivy.yaml --table-mode detailed --skip-check-update --misconfig-scanners terraform $$v $$m || rc=1;
         done; exit $$rc
 
+  # README generation (docs/docs-lint): terraform-docs and yq in one image built from two pinned images. The check
+  # reads the checkout read-only and works on a copy in /tmp; generate writes the READMEs as the calling user.
+  docs-check:
+    <<: *scanner
+    build: docs/docs-lint
+    image: qcm-docs-lint:local
+    command: [sh, docs/docs-lint/docs.sh, check]
+
+  docs-generate:
+    build: docs/docs-lint
+    image: qcm-docs-lint:local
+    volumes:
+      - .:/src
+    working_dir: /src
+    network_mode: none
+    user: ${QCM_UID:-1000}:${QCM_GID:-1000}
+    command: [sh, docs/docs-lint/docs.sh, generate]
+
   yamllint:
     <<: *scanner
     image: ${LINT_REGISTRY:-}pipelinecomponents/yamllint:0.35.27@sha256:f7f7b4f8824839e33690a880dbe20944128b0dc9c55522a0b92a29b3a905cecf

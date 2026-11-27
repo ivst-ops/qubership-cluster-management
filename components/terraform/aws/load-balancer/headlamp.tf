@@ -53,5 +53,6 @@ resource "aws_lb_listener_rule" "headlamp" {
 }
 
 output "headlamp_node_port" {
-  value = var.headlamp_node_port
+  description = "Node port that the load balancer forwards to Headlamp"
+  value       = var.headlamp_node_port
 }

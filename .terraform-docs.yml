@@ -1,0 +1,39 @@
+# Generated block of every module README: `task docs:generate` (docs/docs-lint/docs.sh). Text outside the markers is
+# written by hand and kept.
+version: "= 0.25.1"
+formatter: markdown table
+
+# `providers` stays out: it prints the lock-file versions, so every provider update would change the READMEs.
+sections:
+  show: [requirements, modules, resources, data-sources, inputs, outputs]
+
+# .docs-deps.md is written next to a temporary copy of the module from the stack catalog (docs/deps.yq).
+content: |-
+  ## Component dependencies
+
+  {{ include ".docs-deps.md" }}
+
+  {{ .Requirements }}
+
+  {{ .Modules }}
+
+  {{ .Resources }}
+
+  {{ .Inputs }}
+
+  {{ .Outputs }}
+
+output:
+  file: README.md
+  mode: inject
+  template: |-
+    <!-- BEGIN_TF_DOCS -->
+    {{ .Content }}
+    <!-- END_TF_DOCS -->
+
+sort:
+  enabled: true
+  by: required
+
+settings:
+  lockfile: false

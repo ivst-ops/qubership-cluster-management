@@ -1,12 +1,14 @@
 output "ami_info" {
-  value = data.aws_ami.eks_worker
+  description = "The machine image found for the launch template (empty without a launch template)"
+  value       = data.aws_ami.eks_worker
 }
 
 output "autoscaling_group_name" {
-  value = try(aws_eks_node_group.this.resources[0].autoscaling_groups[0].name, null)
+  description = "Name of the Auto Scaling group behind the node group; null before EKS reports it"
+  value       = try(aws_eks_node_group.this.resources[0].autoscaling_groups[0].name, null)
 }
 output "eks_ami_type" {
-  description = "AMI type given to EKS; null when the launch template names a custom image"
+  description = "AMI type given to EKS; null when `use_custom_ami = true` and the launch template names the image"
   value       = local.eks_ami_type
 }
 

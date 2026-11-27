@@ -1,0 +1,30 @@
+# Rows of the "Component dependencies" table: every !terraform.state reference and settings.depends_on entry that a
+# stack catalog file declares for component strenv(COMPONENT) of kind strenv(KIND) (terraform or helmfile), and every
+# !terraform.state in the vars of the whole kind (`terraform.vars`, `helmfile.vars`). Customer stacks are not read, so
+# a per-stack override never changes a README. Run once per catalog file with FILE set to its path.
+#
+# Abstract components are not listed; their vars reach every instance that inherits them (metadata.inherits), and an
+# instance without metadata.component takes the component of what it inherits. The output column is the path of the
+# referenced output, without YAML quotes and without the yq expression that follows it.
+. as $root
+| ($root.components[strenv(KIND)] // {}) as $all
+| (
+  $all | to_entries | .[]
+  | select(.value.metadata.type != "abstract")
+  | .key as $instance
+  | (.value.metadata.inherits // []) as $parents
+  | select((.value.metadata.component // ([$parents[] | $all[.].metadata.component] | .[0]) // .key) == strenv(COMPONENT))
+  | (($parents | .[] as $p ireduce ({}; . * ($all[$p].vars // {}))) * (.value.vars // {})) as $vars
+  | (
+      ($vars | to_entries | .[] | .key as $var | .value | .. | select(tag == "!terraform.state")
+        | (split(" ") as $w | ($w[1:] | join(" ") | sub("^['\"]", "") | sub("['\"]$", "") | sub(" *\\|.*$", "")) as $out | "`" + $w[0] + "` (`" + ("." + $out | sub("^\\.\\.", ".")) + "`)") as $ref
+        | "| `" + $instance + "` | `vars." + $var + "` | " + $ref + " | `" + strenv(FILE) + "` |"),
+      (.value.settings.depends_on // [] | .[] | .component
+        | "| `" + $instance + "` | `settings.depends_on` | `" + . + "` | `" + strenv(FILE) + "` |")
+    )
+),
+(
+  (.[strenv(KIND)] | .vars // {}) | to_entries | .[] | .key as $var | .value | .. | select(tag == "!terraform.state")
+  | (split(" ") as $w | ($w[1:] | join(" ") | sub("^['\"]", "") | sub("['\"]$", "") | sub(" *\\|.*$", "")) as $out | "`" + $w[0] + "` (`" + ("." + $out | sub("^\\.\\.", ".")) + "`)") as $ref
+  | "| every " + strenv(KIND) + " component | `" + strenv(KIND) + ".vars." + $var + "` | " + $ref + " | `" + strenv(FILE) + "` |"
+)
