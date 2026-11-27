@@ -83,6 +83,9 @@ compose.yml                               # tools container for the developer Ta
 Taskfile.yml                              # developer tasks on the host: images, tests, lab, e2e, bundle
 taskfiles/{docs,lint}.yml                 # included Taskfiles: `task docs:diagrams`, `task lint` (docs/quality-gate.md)
 devbox.json                               # developer tools (`devbox shell`), Task among them
+compose.lint.yml                          # quality-gate scanner images: tflint, Trivy, yamllint (docs/quality-gate.md)
+.tflint.hcl, .yamllint.yaml               # tflint and yamllint rules of the quality gate (docs/quality-gate.md)
+trivy.yaml, .trivyignore.yaml             # Trivy settings and time-limited accepted findings (docs/quality-gate.md)
 local/
   {compose.yml,compose.azure.yml,settings.example.json}   # Floci emulators and lab settings
   compose.cache.yml                       # registry pull-through cache shared by the labs of the host

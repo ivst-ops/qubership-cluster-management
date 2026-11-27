@@ -470,6 +470,8 @@ ALB uses the customer1 stack's kubeconfig_path, matching Prepare's output file.
 | `validate` | `task doctor`, then `task test` with that image |
 | `deploy` | `task doctor`, then `task e2e` per matrix entry (customer1 AWS, customer2 AWS with `KEEP=true`, customer1 Azure); on failure `task lab:diagnostics` |
 
+`Quality gate` ([lint.yml](../.github/workflows/lint.yml)) runs `task lint` and `task docs:diagrams:check` ([quality gate](quality-gate.md)).
+
 `Bundle` ([bundle.yml](../.github/workflows/bundle.yml)) builds and publishes the offline bundle on a `bundle-*` tag or
 a manual run ([bundle release](vm-installation.md#bundle-from-a-github-release)).
 

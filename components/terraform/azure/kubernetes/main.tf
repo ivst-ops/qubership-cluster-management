@@ -22,12 +22,16 @@ resource "azurerm_kubernetes_cluster" "main" {
     vm_size        = var.vm_size
     vnet_subnet_id = var.subnet_id
   }
+  api_server_access_profile {
+    authorized_ip_ranges = var.api_server_authorized_ip_ranges
+  }
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.cluster.id]
   }
   network_profile {
     network_plugin = "azure"
+    network_policy = "azure"
     service_cidr   = var.service_cidr
     dns_service_ip = var.dns_service_ip
   }

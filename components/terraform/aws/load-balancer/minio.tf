@@ -15,13 +15,14 @@ locals {
 }
 
 # Разрешаем балансировщику обращаться к NodePort консоли.
+# The ALB reaches the node port inside the VPC only.
 resource "aws_vpc_security_group_egress_rule" "minio_console" {
   security_group_id = aws_security_group.alb.id
 
   ip_protocol = "tcp"
   from_port   = local.minio_console_node_port
   to_port     = local.minio_console_node_port
-  cidr_ipv4   = "0.0.0.0/0"
+  cidr_ipv4   = data.aws_vpc.this.cidr_block
 }
 
 # Создаём группу целей для консоли.
@@ -51,7 +52,7 @@ resource "aws_lb_target_group_attachment" "minio_console" {
 
 # Запросы с именем minio.localhost направляем в консоль.
 resource "aws_lb_listener_rule" "minio_console" {
-  listener_arn = aws_lb_listener.http.arn
+  listener_arn = local.rules_listener_arn
   priority     = 1
 
   action {

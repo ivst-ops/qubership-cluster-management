@@ -1,0 +1,45 @@
+# Quality-gate scanners for `task lint`, pinned by tag and digest, offline; see docs/quality-gate.md.
+x-scanner: &scanner
+  volumes:
+    - .:/src:ro
+  working_dir: /src
+  network_mode: none
+
+x-trivy-image: &trivy-image
+  image: ${LINT_REGISTRY:-}aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+
+services:
+  tflint:
+    <<: *scanner
+    image: ${LINT_REGISTRY:-ghcr.io/}terraform-linters/tflint:v0.65.0@sha256:2788f4d4fc663c0e953b011b01bf443fe5bfce7587ee916e588e6057b85d6359
+    entrypoint: [tflint]
+    command: [--config=/src/.tflint.hcl, --recursive, --format=compact]
+
+  # Secrets in the working tree, Dockerfiles and plain Kubernetes YAML (trivy.yaml).
+  # --skip-check-update: the checks embedded in the binary, no download of the checks bundle (offline).
+  trivy:
+    <<: [*scanner, *trivy-image]
+    environment:
+      TRIVY_CACHE_DIR: /tmp/trivy
+    command: [fs, --config=/src/trivy.yaml, --skip-check-update, /src]
+
+  # OpenTofu: one `trivy config` per module, with the module's trivy.tfvars when it has one, so that resources created
+  # by for_each and count over inputs are scanned. Fails when any module has a finding.
+  trivy-tf:
+    <<: [*scanner, *trivy-image]
+    environment:
+      TRIVY_CACHE_DIR: /tmp/trivy
+    entrypoint: [sh, -c]
+    command:
+      - >-
+        rc=0;
+        for m in $$(find components/terraform -name versions.tf -not -path '*/.terraform/*' | xargs -n1 dirname | sort); do
+        v=; [ -f $$m/trivy.tfvars ] && v="--tf-vars $$m/trivy.tfvars";
+        trivy config -q --config=/src/trivy.yaml --table-mode detailed --skip-check-update --misconfig-scanners terraform $$v $$m || rc=1;
+        done; exit $$rc
+
+  yamllint:
+    <<: *scanner
+    image: ${LINT_REGISTRY:-}pipelinecomponents/yamllint:0.35.27@sha256:f7f7b4f8824839e33690a880dbe20944128b0dc9c55522a0b92a29b3a905cecf
+    entrypoint: [yamllint]
+    command: [--config-file=/src/.yamllint.yaml, .]

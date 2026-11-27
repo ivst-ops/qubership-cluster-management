@@ -10,6 +10,8 @@ resource "aws_security_group" "main" {
   vpc_id      = var.vpc_id
 }
 
+# Accepted until 2027-02-17 (baseline of the quality gate): Kubernetes VMs reach Nexus and the package mirrors; restrict once the offline network model is fixed.
+#trivy:ignore:AWS-0104:exp:2027-02-17
 resource "aws_vpc_security_group_egress_rule" "outbound" {
   security_group_id = aws_security_group.main.id
 
@@ -50,7 +52,15 @@ resource "aws_instance" "vm" {
 
   vpc_security_group_ids = [aws_security_group.main.id]
 
+  # IMDSv2 only. Hop limit 2: pods on the Kubernetes nodes reach the metadata through the node's network namespace.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
   root_block_device {
+    encrypted   = true
     volume_size = each.value.volume_size
   }
 

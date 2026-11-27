@@ -10,5 +10,6 @@ provider "aws" {
   endpoints {
     eks = var.local_endpoint
     iam = var.local_endpoint
+    kms = var.local_endpoint
   }
 }

@@ -4,6 +4,8 @@ resource "aws_security_group" "nexus" {
   vpc_id      = var.vpc_id
 }
 
+# Accepted until 2027-02-17 (baseline of the quality gate): Nexus reaches upstream mirrors; restrict once the offline network model is fixed.
+#trivy:ignore:AWS-0104:exp:2027-02-17
 resource "aws_vpc_security_group_egress_rule" "outbound" {
   security_group_id = aws_security_group.nexus.id
 
@@ -18,6 +20,15 @@ resource "aws_instance" "nexus" {
 
   vpc_security_group_ids = [aws_security_group.nexus.id]
 
+  # IMDSv2 only: a token is required for the instance metadata (SSRF cannot read the instance role credentials).
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+  root_block_device {
+    encrypted = true
+  }
   tags = {
     Name        = "${var.environment}-nexus"
     Environment = var.environment

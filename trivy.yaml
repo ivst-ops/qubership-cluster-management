@@ -1,0 +1,26 @@
+# Trivy settings for `task lint:trivy` (passes `trivy` and `trivy-tf` in compose.lint.yml); see docs/quality-gate.md.
+scan:
+  scanners: [misconfig, secret]
+  # Git-ignored runtime data (Trivy does not read .gitignore): the emulators keep their own keys and CAs there.
+  skip-dirs:
+    - "**/.terraform"
+    - .local-runtime
+    - .task
+    - .devbox
+    - dist
+    - .claude
+    - local/floci-data
+    - local/floci-azure-data
+    - local/backups
+    - "**/terraform.tfstate.d"
+  skip-files:
+    - "**/*.tfstate"
+    - "**/*.tfstate.*"
+severity: [HIGH, CRITICAL]
+exit-code: 1
+format: table
+misconfiguration:
+  scanners: [dockerfile, kubernetes]
+# Accepted findings that cannot be written inline (Dockerfiles). OpenTofu findings are accepted inline, on the one
+# resource, with `#trivy:ignore:<ID>:exp:<date>` and a reason comment.
+ignorefile: .trivyignore.yaml
