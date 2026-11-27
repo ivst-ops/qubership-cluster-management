@@ -26,6 +26,7 @@ task test                         # stacks, module validation and tests, script 
 task e2e                          # what CI deploys: Floci up, deploy, check, destroy, release (CLOUD=azure; KEEP=true keeps the lab; customer2 has no destroy workflow: CUSTOMER=customer2 KEEP=true)
 task tools:shell                  # a shell with Atmos, OpenTofu, kubectl, Kubemarine...
 task image:release                # the linux/amd64 tools image, as CI builds it (qcm-tools:local)
+task docs:diagrams                # regenerate docs/diagrams (manual; docs:diagrams:check compares)
 ```
 
 ### Upgrading an existing checkout

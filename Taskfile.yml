@@ -15,6 +15,9 @@
 # bundle/*.sh (manifest-driven downloads) and local/lab/lab-api.sh (a CGI script inside the lab sidecar).
 version: '3'
 
+includes:
+  docs: taskfiles/docs.yml
+
 vars:
   DEV_IMAGE: qcm-tools:dev
   RELEASE_IMAGE: qcm-tools:local
