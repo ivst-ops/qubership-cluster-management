@@ -28,8 +28,4 @@ resource "aws_iam_user" "kubectl" {
   name          = "${var.environment}-kubectl"
   force_destroy = true
 
-  tags = {
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
 }

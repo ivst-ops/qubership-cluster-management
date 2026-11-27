@@ -3,14 +3,30 @@ version: '3'
 
 vars:
   LINT: docker compose -f compose.lint.yml run --rm --quiet-pull
+  # The cost-allocation tags file every cloud module carries; the copies must stay identical. Copies, not symlinks:
+  # a Windows checkout without core.symlinks turns a symlink into a text file and breaks the module.
+  COST_TAGS_SOURCE: components/terraform/aws/network/cost_tags.tf
 
 tasks:
   default:
     desc: 'Quality gate: tflint, Trivy (misconfiguration and secrets), yamllint, identical module copies; changes nothing'
     cmds:
+      - task: copies
       - task: tflint
       - task: trivy
       - task: yamllint
+
+  copies:
+    desc: 'Every components/terraform/<cloud>/<module>/cost_tags.tf is identical to {{.COST_TAGS_SOURCE}}'
+    silent: true
+    vars:
+      COPIES:
+        sh: find components/terraform/aws components/terraform/azure components/terraform/gcp -mindepth 1 -maxdepth 1 -type d | sort
+    cmds:
+      - for: {var: COPIES}
+        cmd: >-
+          cmp -s {{.COST_TAGS_SOURCE}} {{.ITEM}}/cost_tags.tf
+          || { echo "{{.ITEM}}/cost_tags.tf differs from {{.COST_TAGS_SOURCE}} or is missing"; exit 1; }
 
   tflint:
     desc: tflint over components/terraform (bundled terraform ruleset, .tflint.hcl)

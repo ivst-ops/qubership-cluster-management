@@ -42,10 +42,6 @@ resource "aws_lb" "argocd" {
   security_groups = [aws_security_group.alb.id]
   subnets         = values(var.subnet_ids)
 
-  tags = {
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
 }
 
 

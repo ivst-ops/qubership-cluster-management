@@ -62,13 +62,13 @@ resource "aws_instance" "vm" {
   root_block_device {
     encrypted   = true
     volume_size = each.value.volume_size
+    # default_tags do not reach the root volume.
+    tags = local.cost_tags
   }
 
   tags = {
-    Name        = "${var.environment}-${each.key}"
-    Environment = var.environment
-    Role        = join(",", concat([var.name], each.value.roles))
-    ManagedBy   = "terraform"
+    Name = "${var.environment}-${each.key}"
+    Role = join(",", concat([var.name], each.value.roles))
   }
 
   depends_on = [

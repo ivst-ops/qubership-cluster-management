@@ -52,3 +52,15 @@ variable "allowed_cidrs" {
   description = "Sources for ports: the subnet CIDR for private groups, operator CIDRs for the jump host"
   type        = list(string)
 }
+
+variable "tenant" {
+  description = "Customer identifier supplied by Atmos"
+  type        = string
+  default     = null
+}
+
+variable "stage" {
+  description = "Environment stage supplied by Atmos"
+  type        = string
+  default     = null
+}

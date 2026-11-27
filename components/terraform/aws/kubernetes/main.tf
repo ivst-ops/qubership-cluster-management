@@ -23,8 +23,4 @@ resource "aws_eks_cluster" "main" {
     aws_iam_role_policy_attachment.cluster
   ]
 
-  tags = {
-    Environment = var.environment
-    ManagedBy   = "terraform"
-  }
 }

@@ -2,6 +2,8 @@ resource "azurerm_user_assigned_identity" "cluster" {
   name                = "${var.environment}-aks"
   location            = var.region
   resource_group_name = var.resource_group_name
+
+  tags = local.cost_tags
 }
 resource "azurerm_role_assignment" "network" {
   count                = var.manage_network_role_assignment ? 1 : 0
@@ -21,6 +23,8 @@ resource "azurerm_kubernetes_cluster" "main" {
     node_count     = var.node_count
     vm_size        = var.vm_size
     vnet_subnet_id = var.subnet_id
+    # The node scale set and its VMs (cost allocation of the nodes).
+    tags = local.cost_tags
   }
   api_server_access_profile {
     authorized_ip_ranges = var.api_server_authorized_ip_ranges
@@ -36,4 +40,6 @@ resource "azurerm_kubernetes_cluster" "main" {
     dns_service_ip = var.dns_service_ip
   }
   depends_on = [azurerm_role_assignment.network]
+
+  tags = local.cost_tags
 }

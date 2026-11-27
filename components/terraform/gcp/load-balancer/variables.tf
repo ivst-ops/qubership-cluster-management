@@ -28,3 +28,15 @@ variable "health_check_path" {
   type    = string
   default = "/"
 }
+
+variable "tenant" {
+  description = "Customer identifier supplied by Atmos"
+  type        = string
+  default     = null
+}
+
+variable "stage" {
+  description = "Environment stage supplied by Atmos"
+  type        = string
+  default     = null
+}

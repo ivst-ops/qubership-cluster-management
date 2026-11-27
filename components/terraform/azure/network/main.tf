@@ -1,12 +1,16 @@
 resource "azurerm_resource_group" "main" {
   name     = "${var.environment}-rg"
   location = var.region
+
+  tags = local.cost_tags
 }
 resource "azurerm_virtual_network" "main" {
   name                = "${var.environment}-vnet"
   location            = var.region
   resource_group_name = azurerm_resource_group.main.name
   address_space       = [var.vpc_cidr]
+
+  tags = local.cost_tags
 }
 resource "azurerm_subnet" "main" {
   for_each             = var.subnets
