@@ -1,6 +1,15 @@
 resource "aws_eks_cluster" "main" {
   name     = "${var.environment}-eks"
   role_arn = aws_iam_role.cluster.arn
+  version  = var.kubernetes_version
+
+  # Access entries instead of the aws-auth ConfigMap (decision of 2026-11-27). EKS moves an existing cluster only
+  # CONFIG_MAP -> API_AND_CONFIG_MAP -> API, one apply each (docs/deployment.md). The creator keeps its admin entry:
+  # changing bootstrap_cluster_creator_admin_permissions would replace the cluster.
+  access_config {
+    authentication_mode                         = var.authentication_mode
+    bootstrap_cluster_creator_admin_permissions = true
+  }
 
   vpc_config {
     subnet_ids = values(var.subnet_ids)

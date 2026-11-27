@@ -5,3 +5,19 @@ components:
         component: aws/kubernetes
       vars:
         subnet_ids: !terraform.state network subnet_ids
+        # Managed add-ons: CNI and kube-proxy with the cluster, CoreDNS and the
+        # EBS CSI driver after the node groups. Versions follow the EKS default of the cluster version unless set.
+        addons:
+          vpc-cni:
+            before_nodes: true
+          kube-proxy:
+            before_nodes: true
+          coredns: {}
+          aws-ebs-csi-driver:
+            irsa_role: ebs-csi
+        irsa_enabled: true
+        irsa_roles:
+          ebs-csi:
+            namespace: kube-system
+            service_account: ebs-csi-controller-sa
+            policy_arns: [arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy]
