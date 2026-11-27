@@ -296,8 +296,12 @@ Validation prints `All stacks validated successfully`. Dry-run lists the top-lev
 ## 5. Deploy
 
 ```bash
-task -d local secrets:exec STACK="$stack" -- atmos workflow deploy-vm -f "$workflow"
+task -d local logs:run STACK="$stack" -- atmos workflow deploy-vm -f "$workflow"
 ```
+
+`logs:run` runs the command with the stack secrets (like `secrets:exec`) and collects the logs of the run, see
+[Run logs](#run-logs). Without it, `task -d local secrets:exec STACK="$stack" -- atmos workflow deploy-vm -f "$workflow"`
+deploys the same way.
 
 Expected durations; most of the time is Kubemarine and the bundle upload:
 
@@ -318,6 +322,44 @@ the final inventory stays in `.local-runtime/kubemarine/$stack/dump`.
 The workflow ends with `close-access`: the jump host is destroyed, so nothing in the environment accepts connections
 from outside. If a step fails, fix the cause and run the same command again. Applied OpenTofu components change
 nothing, Kubemarine does not reinstall, and the bundle upload skips what Nexus already has.
+
+### Run logs
+
+`task -d local logs:run STACK="$stack" -- <command>` runs any command of this guide (a workflow, `atmos terraform
+apply ...`) with the stack secrets and, when it ends, successfully or not, writes one archive:
+`.local-runtime/logs/<stack>-<UTC time>-<pid>-<ok|failed>.tar.gz`. The console output is kept. Task fails the run
+when the command fails (exit status 201); the exit status of the command itself is in `run/summary.txt` and the
+`-failed` suffix. Every part is optional; what cannot be reached is noted in `run/collect.log` and skipped.
+
+| In the archive | Content |
+|---|---|
+| `run/` | `summary.txt` (command, exit code, times, commit), `console.log`, `collect.log` |
+| `config/stack.yaml` | `atmos describe stacks -s <stack>` |
+| `kubemarine/` | `cluster.yaml`, `cluster_finalized.yaml` and the `*.log` files (`dump/debug.log`) of `.local-runtime/kubemarine/<stack>`; keys, certificates and kubeconfigs are left out |
+| `kubernetes/` | `cluster-info dump` of all namespaces (state, events, container logs), needs the API (the tunnel) |
+| `nexus/`, `nodes/` | Nexus log and the containerd and kubelet journals of the nodes, while the jump host exists |
+
+Treat the archive as sensitive: pod specs in `cluster-info dump` show literal environment values, and the console log
+shows whatever the tools print. Do not attach it to a public issue unchecked.
+
+To upload it as well, set `LOGS_UPLOAD_URL` in the stack secrets (or the environment):
+
+```bash
+task -d local secrets:exec STACK="$stack" -- true            # the secrets decrypt
+sops set "secrets/$stack.yaml" '["LOGS_UPLOAD_URL"]' '"s3://my-logs/qcm"'
+task -d local logs:run STACK="$stack" -- true                # test: a small archive is uploaded
+```
+
+| `LOGS_UPLOAD_URL` | Storage | Credentials |
+|---|---|---|
+| `s3://bucket/prefix` | AWS S3, or S3-compatible with `AWS_ENDPOINT_URL_S3` | The usual AWS variables or profile; an identity that may only `s3:PutObject` on the prefix |
+| `https://ACCOUNT.blob.core.windows.net/CONTAINER/prefix?SAS` | Azure Blob Storage | A container SAS with create and write rights only, in the URL |
+| `gs://bucket/prefix` | Google Cloud Storage through its S3 interoperability API | An HMAC key of a service account that may only create objects, in `LOGS_GCS_HMAC_ACCESS_ID` and `LOGS_GCS_HMAC_SECRET` |
+
+Use write-only identities, so a leaked secret file cannot read the archives. The tools image has the AWS CLI and curl,
+not `gcloud` or `az`, hence these forms. A failed upload is reported and the archive stays local. The local lab and
+CI keep archives of emulator runs only (CI artifact `logs-<stack>-attempt<N>`, 14 days); never run real-cloud stacks
+through a CI step that uploads artifacts.
 
 ## 6. Work with the cluster later
 
@@ -373,7 +415,7 @@ task -d local secrets:exec STACK="$stack" -- atmos terraform apply kubemarine -s
 ## 7. Destroy
 
 ```bash
-task -d local secrets:exec STACK="$stack" -- atmos workflow destroy-vm -f "$workflow"
+task -d local logs:run STACK="$stack" -- atmos workflow destroy-vm -f "$workflow"
 ```
 
 Destroy stops the tunnel and removes the installer state, VMs, Nexus, jump host, and network. OpenTofu state is local
@@ -384,7 +426,7 @@ the resource group is gone (`az group list -o table`) and delete the service pri
 
 | Symptom | Check |
 |---|---|
-| `No SSH key` from `lab.sh` | The task was not run under `task -d local secrets:exec`. |
+| `No SSH key` from `lab.sh` | The task was not run under `task -d local secrets:exec` (or `logs:run`). |
 | `sops: command not found`, `atmos: command not found` | The command ran on the host: run it in `task tools:shell`, or as `task ops -- <task>`. |
 | SOPS: `no identity matched` or cannot decrypt | Check `SOPS_AGE_KEY_FILE` (or another key source) and the recipients in the encrypted file. |
 | AWS API or registry connection refused | Check `HTTPS_PROXY` / `NO_PROXY` in the shell you run Task from (`task run -- env`). |
@@ -394,7 +436,8 @@ the resource group is gone (`az group list -o table`) and delete the service pri
 | SSH `REMOTE HOST IDENTIFICATION HAS CHANGED` after VMs were recreated | Delete `.local-runtime/known_hosts-$stack`. |
 | Nexus upload fails | Check that `.local-runtime/bundle/nexus.tar.gz` exists. On the VM: `systemctl status nexus`, `/opt/sonatype-work/nexus3/log/nexus.log`. |
 | Kubemarine fails on packages or images | Nexus is not fully loaded: rerun `task -d local nexus:load` with access open, then reinstall with `-replace=terraform_data.install`. |
-| Kubemarine fails otherwise | The apply output and `.local-runtime/kubemarine/$stack/dump/debug.log`. |
+| Kubemarine fails otherwise | The apply output and `.local-runtime/kubemarine/$stack/dump/debug.log`; for a run through `logs:run`, the `-failed` archive in `.local-runtime/logs/`. |
+| A run failed and you need the logs | `.local-runtime/logs/<stack>-…-failed.tar.gz` (`task -d local logs:run`, [Run logs](#run-logs)); run the failed command again through `logs:run` if it was not. |
 | Application pod `ImagePullBackOff` | The image is missing from `app_images` in the manifest, or its registry is new: rebuild, reload, and reinstall `kubemarine` so containerd gets the mirror. |
 | Azure `QuotaExceeded` | The vCPU quota is lower than the stack needs; see [Azure prerequisites](#azure-prerequisites). |
 | Azure `SkuNotAvailable` | The VM size has no capacity in the region: choose another `region` or override `instance_type` in the stack. |

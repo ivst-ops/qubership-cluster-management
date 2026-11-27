@@ -51,6 +51,14 @@ locals {
 resource "terraform_data" "install" {
   triggers_replace = [var.environment]
 
+  # gateway_nodes tolerates a missing jump host so that destroy-vm can evaluate; installing needs it.
+  lifecycle {
+    precondition {
+      condition     = try(var.jump_host.address, null) != null
+      error_message = "The jump host is missing: run open-access before installing Kubemarine."
+    }
+  }
+
   provisioner "local-exec" {
     interpreter = ["bash", "-c"]
     command     = <<-EOT

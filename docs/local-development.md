@@ -302,6 +302,7 @@ proxies come from the shell ([proxies](getting-started.md#4-network-access-proxi
 | `task test:render STACK=...` | Host → tools container | Renders the Helmfile components of a stack without applying them |
 | `task -d local prepare STACK=...` | Tools container | After Kubernetes creation: fixes node networking, webhook and DNS, configures AWS access and kubeconfig, waits for node and CoreDNS (`local/lab.sh prepare`) |
 | `task -d local prepare-azure STACK=...` | Tools container | Writes the AKS kubeconfig with the published API port, waits for nodes and CoreDNS (`local/lab.sh prepare-azure`) |
+| `task -d local logs:run STACK=... -- <command>` | Tools container | Runs the command (with `secrets/STACK.yaml` if it exists) and writes `.local-runtime/logs/STACK-<time>-<pid>-<ok\|failed>.tar.gz`; uploads it when `LOGS_UPLOAD_URL` is set. `lab:deploy` and `lab:destroy` use it; in CI the archives of each deploy job are the artifact `logs-<stack>-attempt<N>` (14 days). See [Run logs](vm-installation.md#run-logs) |
 | `task -d local trust-azure` | Tools container | Downloads and trusts the Floci Azure CA (`lab:up CLOUD=azure` runs it) |
 | `local/lab.sh nexus-endpoint-json` | Tools container, by OpenTofu | External program for Floci: reads instance_id from stdin JSON, waits for the published port, returns URL JSON. Timeout 600 seconds (`NEXUS_ENDPOINT_TIMEOUT`), polling every 5 seconds. Does not check application readiness |
 | `local/lab/lab-api.sh` | Lab sidecar | The Docker operations of lab.sh (node repair, published ports) behind a small HTTP API |

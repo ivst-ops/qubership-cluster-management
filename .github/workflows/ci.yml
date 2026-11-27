@@ -139,6 +139,15 @@ jobs:
       # Taskfile.yml: emulator and tools container up, deploy workflow, cluster check, destroy workflow.
       - name: Deploy and destroy on the emulator
         run: devbox run -- task e2e IMAGE="$IMAGE" ${{ matrix.vars }}
+      # The deploy and destroy steps of task e2e write one archive each (task -d local logs:run) into the checkout.
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: logs-${{ matrix.stack }}-attempt${{ github.run_attempt }}
+          path: .local-runtime/logs/*.tar.gz
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Diagnostics
         if: failure()
         run: devbox run -- task lab:diagnostics IMAGE="$IMAGE" ${{ matrix.vars }}
