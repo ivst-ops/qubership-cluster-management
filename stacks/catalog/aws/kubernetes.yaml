@@ -21,3 +21,34 @@ components:
             namespace: kube-system
             service_account: ebs-csi-controller-sa
             policy_arns: [arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy]
+        # Defaults of every managed node group (the EKS-optimised AL2023 image, no zram there):
+        # kubeReserved = min(20 MiB × maxPods + 50 MiB, 25%), systemReserved = 1 GiB + 256 MiB, 500m CPU,
+        # all eviction values explicit. Update and repair: safe defaults (one node at a time, no forced update, no
+        # automatic repair), overridden per group or per stack.
+        # maxPods follows the instance type: maxPods = min(110, ENI limit); m6i.xlarge has 4 ENIs x 15 addresses, so
+        # (4 x 14) + 2 = 58 without prefix delegation; kubeReserved.memory = 20 MiB x 58 + 50 MiB. A group with
+        # another instance type sets both.
+        node_group_defaults:
+          instance_type: m6i.xlarge
+          max_pods: 58
+          max_unavailable: 1
+          force_update_version: false
+          auto_repair: false
+          kubelet_config:
+            kubeReserved: {cpu: 200m, memory: 1210Mi}
+            systemReserved: {cpu: 300m, memory: 1280Mi}
+            evictionHard:
+              memory.available: 500Mi
+              nodefs.available: "10%"
+              nodefs.inodesFree: "5%"
+              imagefs.available: "15%"
+              imagefs.inodesFree: "5%"
+            evictionSoft:
+              memory.available: 1Gi
+              nodefs.available: "15%"
+              imagefs.available: "20%"
+            evictionSoftGracePeriod:
+              memory.available: 90s
+              nodefs.available: 2m
+              imagefs.available: 2m
+        node_groups: {}

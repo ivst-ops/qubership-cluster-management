@@ -21,3 +21,8 @@ output "addon_versions" {
   description = "Installed version of each managed add-on"
   value       = merge(module.addons_before_nodes.versions, module.addons.versions)
 }
+
+output "node_group_names" {
+  description = "Names of the managed node groups by short name"
+  value       = { for k, g in module.node_groups : k => "${var.environment}-${k}" }
+}

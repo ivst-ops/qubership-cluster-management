@@ -38,4 +38,6 @@ module "addons" {
 
   cluster_name = aws_eks_cluster.main.name
   addons       = { for k, a in local.addons : k => a.addon if !a.before_nodes }
+
+  depends_on = [module.node_groups]
 }

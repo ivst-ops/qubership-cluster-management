@@ -101,3 +101,72 @@ variable "irsa_roles" {
   }))
   default = {}
 }
+
+variable "node_group_defaults" {
+  description = "Settings every node group takes unless it sets its own (stack catalog)"
+  type = object({
+    instance_type    = optional(string, "m6i.xlarge")
+    min_size         = optional(number, 3)
+    max_size         = optional(number, 3)
+    desired_size     = optional(number, 3)
+    capacity_type    = optional(string, "ON_DEMAND")
+    root_volume_size = optional(number, 50)
+    # Update and repair: safe defaults (one node at a time, no forced update, no automatic repair), overridden in the
+    # stack. max_unavailable_percentage replaces max_unavailable when set.
+    max_unavailable            = optional(number, 1)
+    max_unavailable_percentage = optional(number)
+    force_update_version       = optional(bool, false)
+    auto_repair                = optional(bool, false)
+    # AL2023 by default; Bottlerocket is also accepted. use_custom_ami: the launch template names the EKS image found by name (the
+    # NodeConfig is then the only one on the node); pin ami_release_version, or a new image rolls the group on apply.
+    ami_type            = optional(string, "AL2023_x86_64_STANDARD")
+    use_custom_ami      = optional(bool, true)
+    ami_release_version = optional(string)
+    max_pods            = optional(number)
+    kubelet_config      = optional(any, {})
+  })
+  default = {}
+}
+
+variable "node_groups" {
+  description = "Managed node groups by short name. subnets: keys of subnet_ids (all when empty). additional_volumes: dedicated EBS volumes (for example for the container runtime and the kubelet). Empty (default): no node groups"
+  type = map(object({
+    instance_type              = optional(string)
+    min_size                   = optional(number)
+    max_size                   = optional(number)
+    desired_size               = optional(number)
+    capacity_type              = optional(string)
+    root_volume_size           = optional(number)
+    max_unavailable            = optional(number)
+    max_unavailable_percentage = optional(number)
+    force_update_version       = optional(bool)
+    auto_repair                = optional(bool)
+    ami_type                   = optional(string)
+    use_custom_ami             = optional(bool)
+    ami_release_version        = optional(string)
+    max_pods                   = optional(number)
+    kubelet_config             = optional(any)
+    subnets                    = optional(list(string), [])
+    labels                     = optional(map(string), {})
+    taints = optional(list(object({
+      key    = string
+      value  = optional(string)
+      effect = string
+    })), [])
+    additional_volumes = optional(list(object({
+      block_device_name     = string
+      volume_size           = number
+      volume_type           = optional(string, "gp3")
+      iops                  = optional(number, 3000)
+      throughput            = optional(number, 125)
+      delete_on_termination = optional(bool, true)
+    })), [])
+  }))
+  default = {}
+}
+
+variable "service_cidr" {
+  description = "Service CIDR for the node user data when the cluster does not report one (EKS always does; tests set it)"
+  type        = string
+  default     = null
+}
