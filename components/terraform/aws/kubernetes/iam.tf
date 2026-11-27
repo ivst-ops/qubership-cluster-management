@@ -24,8 +24,16 @@ resource "aws_iam_role_policy_attachment" "cluster" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
+# Only the local lab signs in with an IAM user and static keys (local/lab.sh creates the keys); a real stack names its
+# operator and runner roles in access_entries: static keys are an exception.
 resource "aws_iam_user" "kubectl" {
+  count = var.local_endpoint != null ? 1 : 0
+
   name          = "${var.environment}-kubectl"
   force_destroy = true
+}
 
+moved {
+  from = aws_iam_user.kubectl
+  to   = aws_iam_user.kubectl[0]
 }

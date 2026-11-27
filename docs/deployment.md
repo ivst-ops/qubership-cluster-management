@@ -14,6 +14,29 @@ Azure: `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID` (a service principa
 `GOOGLE_CREDENTIALS` (the service account key JSON). Create the service principal or service account with
 the `az` or `gcloud` CLI on any other machine.
 
+## AWS EKS access
+
+The EKS cluster uses access entries (`authentication_mode: API`), not the `aws-auth` ConfigMap. Name the IAM roles
+of the operators and the CI runner in the stack; each gets the EKS cluster-admin access policy unless it names another:
+
+```yaml
+components:
+  terraform:
+    kubernetes:
+      vars:
+        access_entries:
+          operators: {principal_arn: arn:aws:iam::<account>:role/<operators-role>}
+          runner: {principal_arn: arn:aws:iam::<account>:role/<runner-role>}
+```
+
+The IAM user `<environment>-kubectl` with static keys exists only in the local lab (`local_endpoint` set). A real
+stack that had it loses it on the next apply; operators sign in with their role (`aws eks update-kubeconfig --name
+<environment>-eks --role-arn …`) after it is in `access_entries`.
+
+An existing cluster created before access entries runs in `CONFIG_MAP` mode, and EKS changes the mode one step at a
+time: set `authentication_mode: API_AND_CONFIG_MAP` in the stack and apply, check that the access entries work, then
+remove the override (back to `API`) and apply again.
+
 ## Azure
 
 1. Create a service principal for the intended subscription and put `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET` and

@@ -4,7 +4,7 @@ locals {
   access_entries = merge(
     var.access_entries,
     var.local_endpoint != null ? {
-      lab = { principal_arn = aws_iam_user.kubectl.arn, policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy" }
+      lab = { principal_arn = aws_iam_user.kubectl[0].arn, policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy" }
     } : {}
   )
 }
