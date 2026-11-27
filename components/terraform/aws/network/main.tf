@@ -51,3 +51,24 @@ resource "aws_route_table_association" "public" {
   subnet_id      = each.value.id
   route_table_id = aws_route_table.public.id
 }
+
+# Private-network profile: VPC endpoints for nodes without Internet access. One interface subnet per
+# availability zone (an endpoint takes at most one), gateway routes in the main and the public route table.
+locals {
+  endpoint_subnets = {
+    for az in distinct([for s in values(var.subnets) : s.availability_zone]) :
+    az => [for k, s in var.subnets : aws_subnet.main[k].id if s.availability_zone == az][0]
+  }
+}
+
+module "vpc_endpoints" {
+  source = "../../../../providers/aws/modules/vpc-endpoints"
+
+  name            = var.environment
+  region          = var.region
+  vpc_id          = aws_vpc.main.id
+  vpc_cidr        = aws_vpc.main.cidr_block
+  subnet_ids      = values(local.endpoint_subnets)
+  route_table_ids = [aws_vpc.main.main_route_table_id, aws_route_table.public.id]
+  endpoints       = var.vpc_endpoints
+}
