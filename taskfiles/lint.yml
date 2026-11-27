@@ -6,12 +6,18 @@ vars:
   # The cost-allocation tags file every cloud module carries; the copies must stay identical. Copies, not symlinks:
   # a Windows checkout without core.symlinks turns a symlink into a text file and breaks the module.
   COST_TAGS_SOURCE: components/terraform/aws/network/cost_tags.tf
+  # Paths scanned with the generic patterns of .leakscan.patterns (test fixtures elsewhere carry dummy keys and IDs).
+  LEAK_PATHS: providers
+  # LEAK_EXTRA_PATTERNS (environment or `task lint LEAK_EXTRA_PATTERNS=<file>`): an optional file of patterns kept
+  # outside this repository (names that must not appear here); scanned over the whole working tree, case-insensitive.
+
 
 tasks:
   default:
     desc: 'Quality gate: tflint, Trivy (misconfiguration and secrets), yamllint, identical module copies; changes nothing'
     cmds:
       - task: copies
+      - task: leaks
       - task: tflint
       - task: trivy
       - task: yamllint
@@ -28,8 +34,25 @@ tasks:
           cmp -s {{.COST_TAGS_SOURCE}} {{.ITEM}}/cost_tags.tf
           || { echo "{{.ITEM}}/cost_tags.tf differs from {{.COST_TAGS_SOURCE}} or is missing"; exit 1; }
 
+  leaks:
+    desc: 'Provider modules carry no account or subscription IDs, keys or SSH keys (.leakscan.patterns); with LEAK_EXTRA_PATTERNS also the whole tree'
+    silent: true
+    cmds:
+      # grep exits 1 when nothing matches; the all-zero account of the test mocks is allowed.
+      - >-
+        if grep -rnIE -f .leakscan.patterns {{.LEAK_PATHS}} | grep -v ':000000000000:'; then
+        echo "lint:leaks: account IDs or keys in {{.LEAK_PATHS}}"; exit 1; fi
+      # References to documents that are not part of this repository, anywhere in the working tree.
+      - >-
+        if git grep --untracked -nIE -f .leakscan.repo.patterns -- . ':!.leakscan.repo.patterns'; then
+        echo "lint:leaks: references to documents outside this repository"; exit 1; fi
+      - cmd: >-
+          if git grep --untracked -nIiE -f '{{.LEAK_EXTRA_PATTERNS}}'; then
+          echo "lint:leaks: names from {{.LEAK_EXTRA_PATTERNS}} in the working tree"; exit 1; fi
+        if: test -n '{{.LEAK_EXTRA_PATTERNS}}'
+
   tflint:
-    desc: tflint over components/terraform (bundled terraform ruleset, .tflint.hcl)
+    desc: tflint over components/terraform and providers (bundled terraform ruleset, .tflint.hcl)
     cmds:
       - '{{.LINT}} tflint'
 
