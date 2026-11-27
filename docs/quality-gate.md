@@ -9,7 +9,8 @@ workflow (`.github/workflows/lint.yml`).
 | Task | Checks | Settings |
 |---|---|---|
 | `lint:copies` | Every `components/terraform/<cloud>/<module>/cost_tags.tf` is identical to the one in `aws/network` | `taskfiles/lint.yml` |
-| `lint:tflint` | OpenTofu modules under `components/terraform`: the bundled `terraform` ruleset, `recommended` preset, naming, required versions and providers | `.tflint.hcl` |
+| `lint:leaks` | `providers/`: no cloud account or subscription IDs in context, SSH public keys or private keys (the all-zero account of test mocks is allowed). With `LEAK_EXTRA_PATTERNS=<file>` also the patterns of that file, kept outside the repository, over the whole working tree. `.leakscan.repo.patterns` is checked over the whole working tree too: references to documents that are not part of the repository | `.leakscan.patterns`, `.leakscan.repo.patterns` |
+| `lint:tflint` | OpenTofu modules under `components/terraform` and `providers`: the bundled `terraform` ruleset, `recommended` preset, naming, required versions and providers | `.tflint.hcl` |
 | `lint:trivy` | (1) `trivy fs`: secrets in the working tree, Dockerfiles, plain Kubernetes YAML; (2) `trivy config` per OpenTofu module, with the module's `trivy.tfvars` when it has one | `trivy.yaml` |
 | `lint:yamllint` | Syntax, duplicate keys, indentation of stacks, workflows and CI files (`*.gotmpl` is not plain YAML and is skipped); line length over 160 is a warning only | `.yamllint.yaml` |
 | `lint:pull` | Not part of `task lint`: pulls the three images into the local Docker (see Offline) | `compose.lint.yml` |

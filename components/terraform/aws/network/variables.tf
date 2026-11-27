@@ -44,3 +44,14 @@ variable "local_endpoint" {
   type        = string
   default     = null
 }
+
+variable "vpc_endpoints" {
+  description = "VPC endpoints of the private-network profile by service key, e.g. { \"ecr.api\" = {}, s3 = { type = \"Gateway\" } }. Empty (default): none"
+  type = map(object({
+    type                = optional(string, "Interface")
+    service_name        = optional(string)
+    private_dns_enabled = optional(bool, true)
+    policy              = optional(string)
+  }))
+  default = {}
+}

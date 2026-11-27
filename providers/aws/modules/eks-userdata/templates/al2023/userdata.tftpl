@@ -1,0 +1,33 @@
+Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+MIME-Version: 1.0
+
+%{ for script in pre_userdata ~}
+--==BOUNDARY==
+${script}
+%{ endfor ~}
+%{ if length(ca_bundles) > 0 ~}
+--==BOUNDARY==
+MIME-Version: 1.0
+Content-Type: text/x-shellscript; charset="us-ascii"
+
+#!/bin/bash -e
+%{ for idx, ca in ca_bundles ~}
+cat <<'PEM' > /etc/pki/ca-trust/source/anchors/${idx}.crt
+${ca}
+PEM
+%{ endfor ~}
+update-ca-trust extract
+%{ endif ~}
+%{ if nodeconfig_yaml != null ~}
+--==BOUNDARY==
+MIME-Version: 1.0
+Content-Type: application/node.eks.aws
+
+---
+${nodeconfig_yaml}
+%{ endif ~}
+%{ if post_userdata != null ~}
+--==BOUNDARY==
+${post_userdata}
+%{ endif ~}
+--==BOUNDARY==--

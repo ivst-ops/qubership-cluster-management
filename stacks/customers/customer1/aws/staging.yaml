@@ -1,6 +1,8 @@
 import:
   - customers/customer1/aws/_defaults
   - catalog/aws/network
+  # The lab exercises the endpoints of the private-network profile on Floci (its subnets keep the Internet route).
+  - catalog/aws/private-network
   - catalog/aws/kubernetes
   - catalog/aws/load-balancer
   - catalog/aws/nexus

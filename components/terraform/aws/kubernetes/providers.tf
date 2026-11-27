@@ -13,6 +13,7 @@ provider "aws" {
   }
 
   endpoints {
+    ec2 = var.local_endpoint
     eks = var.local_endpoint
     iam = var.local_endpoint
     kms = var.local_endpoint

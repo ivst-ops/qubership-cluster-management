@@ -15,3 +15,7 @@ output "subnet_ids" {
     key => subnet.id
   }
 }
+output "vpc_endpoint_ids" {
+  description = "IDs of the VPC endpoints by service key"
+  value       = module.vpc_endpoints.endpoint_ids
+}

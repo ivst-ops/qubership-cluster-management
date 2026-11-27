@@ -1,0 +1,16 @@
+# Private-network profile: the VPC endpoints that EKS nodes and VMs without Internet access
+# need for images (ECR, with S3 for the layers), credentials (STS), node and load-balancer APIs and logs.
+# Import it after catalog/aws/network.yaml in a stack whose subnets have no Internet route.
+components:
+  terraform:
+    network:
+      vars:
+        vpc_endpoints:
+          ecr.api: {}
+          ecr.dkr: {}
+          s3:
+            type: Gateway
+          sts: {}
+          ec2: {}
+          elasticloadbalancing: {}
+          logs: {}

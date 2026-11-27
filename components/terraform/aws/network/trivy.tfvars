@@ -7,3 +7,7 @@ subnets = {
   a = { cidr_block = "10.40.1.0/24", availability_zone = "us-east-1a", public = true }
   b = { cidr_block = "10.40.2.0/24", availability_zone = "us-east-1b", public = false }
 }
+vpc_endpoints = {
+  "ecr.api" = {}
+  s3        = { type = "Gateway" }
+}

@@ -1,4 +1,4 @@
-# tflint settings for `task lint:tflint` (compose.lint.yml), run with --recursive over components/terraform.
+# tflint settings for `task lint:tflint` (compose.lint.yml), run with --recursive over components/terraform and providers.
 # Only the bundled `terraform` ruleset: the cloud rulesets (aws, azurerm, google) are plugins that `tflint --init`
 # downloads from GitHub, which the offline gate cannot do. Add them when they are mirrored.
 config {
