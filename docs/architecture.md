@@ -55,6 +55,8 @@ components/
     kubernetes/{nginx,ingress-wait,job-wait,manifest-wait}/   # readiness examples of customer1 AWS
   helmfile/{argocd,istio,kiali,minio,headlamp,traefik}/
   helmfile/warm-chart.sh                  # chart download retries (prepare hook of each release)
+providers/
+  aws/modules/{eks-node-group,eks-userdata,eks-addons,eks-irsa,vpc-endpoints}/   # child modules of the components
 stacks/
   catalog/
     {aws,azure,gcp}/                       # cloud infrastructure settings
@@ -121,7 +123,7 @@ Customer1 AWS imports the following configuration:
 customers/customer1/aws/staging.yaml
 ├─ customers/customer1/aws/_defaults.yaml
 │  └─ customers/customer1/_defaults.yaml
-├─ catalog/aws/{network,kubernetes,load-balancer,nexus}.yaml
+├─ catalog/aws/{network,private-network,kubernetes,load-balancer,nexus}.yaml
 ├─ catalog/helmfile/{istio,argocd,kiali,minio,headlamp}.yaml
 └─ catalog/{kubernetes/{nginx,ingress-wait,job-wait,manifest-wait},helmfile/traefik}.yaml   # readiness examples
 ```
@@ -178,6 +180,13 @@ For `atmos terraform apply network -s customer1-aws-staging`:
 | Local Floci/UI lifecycle | `local/compose.yml`, `local/compose.azure.yml` and `task lab:up` / `lab:stop` |
 | Node and kubeconfig preparation | `task -d local prepare` / `prepare-azure`: `local/lab.sh` and the lab sidecar |
 
+## Provider modules
+
+`providers/<cloud>/modules/` holds provider-specific child modules that the root components call with a relative
+`source`. They have no state of their own and no Atmos component. Each has `versions.tf` and its own
+tests; `task test` runs `tofu test` for each of them, and `task lint` scans them for account IDs and keys
+(`lint:leaks`).
+
 ## OpenTofu components and dependencies
 
 Each physical component directory is a separate root module with its own inputs, providers, state, and plan.
@@ -185,8 +194,8 @@ Dependencies are passed as input identifiers rather than by including another co
 
 | Component | Resources and dependencies |
 |---|---|
-| AWS network | VPC, subnets, gateway, routes; exports vpc_id and subnet_ids |
-| AWS kubernetes | EKS/IAM; consumes network subnet_ids |
+| AWS network | VPC, subnets, gateway, routes, VPC endpoints of the private-network profile (`vpc_endpoints`); exports vpc_id, subnet_ids and vpc_endpoint_ids |
+| AWS kubernetes | EKS with KMS, access entries, managed add-ons, OIDC/IRSA and managed node groups (`node_groups`, defaults from the catalog); consumes network subnet_ids |
 | AWS nexus | VM and access rules; consumes the VPC and one subnet |
 | AWS load-balancer | ALB, target groups, rules, attachments; reads network, EC2 node, and existing Kubernetes Services |
 | Azure network | Resource group, VNet, subnets |
