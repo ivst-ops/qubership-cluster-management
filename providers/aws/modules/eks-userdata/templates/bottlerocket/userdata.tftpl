@@ -1,0 +1,19 @@
+%{if is_custom_ami}
+settings.kubernetes.cluster-name = '${cluster_name}'
+settings.kubernetes.api-server = '${cluster_endpoint}'
+settings.kubernetes.cluster-certificate = '${cluster_auth_base64}'
+settings.kubernetes.cluster-dns-ip = '${cluster_dns_ip}'
+%{for key, value in bootstrap_labels}
+settings.kubernetes.node-labels.'${key}' = "${value}"
+%{endfor ~}
+%{endif}
+%{if max_pods != null ~}
+settings.kubernetes.max-pods = ${max_pods}
+%{endif ~}
+%{for setting in bottlerocket_settings}
+${setting}
+%{endfor ~}
+%{for idx, ca in ca_bundles}
+settings.pki.${idx}.data="${base64encode(ca)}"
+settings.pki.${idx}.trusted=true
+%{endfor ~}

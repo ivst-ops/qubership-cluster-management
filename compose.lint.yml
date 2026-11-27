@@ -33,7 +33,7 @@ services:
     command:
       - >-
         rc=0;
-        for m in $$(find components/terraform -name versions.tf -not -path '*/.terraform/*' | xargs -n1 dirname | sort); do
+        for m in $$(find components/terraform providers -name versions.tf -not -path '*/.terraform/*' | xargs -n1 dirname | sort); do
         v=; [ -f $$m/trivy.tfvars ] && v="--tf-vars $$m/trivy.tfvars";
         trivy config -q --config=/src/trivy.yaml --table-mode detailed --skip-check-update --misconfig-scanners terraform $$v $$m || rc=1;
         done; exit $$rc

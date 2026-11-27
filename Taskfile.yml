@@ -203,14 +203,15 @@ tasks:
       - '{{.X}} atmos validate stacks'
 
   test:modules:
-    desc: 'OpenTofu fmt, then init (no backend), validate and `tofu test` per module in components/terraform'
+    desc: 'OpenTofu fmt, then init (no backend), validate and `tofu test` per module in components/terraform and providers'
     deps: [tools:up]
     vars:
       MODULES:
-        sh: find components/terraform -name versions.tf -not -path '*/.terraform/*' -exec dirname {} \; | sort
+        sh: find components/terraform providers -name versions.tf -not -path '*/.terraform/*' -exec dirname {} \; | sort
     cmds:
       - mkdir -p .local-runtime/tofu-plugins
       - '{{.X}} tofu fmt -check -recursive components/terraform'
+      - '{{.X}} tofu fmt -check -recursive providers'
       - for: {var: MODULES}
         task: test:module
         vars: {MODULE: '{{.ITEM}}'}
