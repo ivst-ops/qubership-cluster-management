@@ -4,7 +4,7 @@
 # Keys and values follow the strictest provider (GCP labels), so one stack tags the same way on every cloud.
 
 variable "cost_tags" {
-  description = "Extra cost-allocation tags, e.g. { cost-center = \"cc-1234\", owner = \"team-x\" }. The mandatory tags (tenant, stage, environment, cloud, managed-by) win over keys of the same name."
+  description = "Extra cost-allocation tags, for example `{ cost-center = \"cc-1234\", owner = \"team-x\" }`; the mandatory tags (`tenant`, `stage`, `environment`, `cloud`, `managed-by`) win over keys of the same name"
   type        = map(string)
   default     = {}
 

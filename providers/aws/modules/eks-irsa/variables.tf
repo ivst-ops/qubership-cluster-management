@@ -4,7 +4,7 @@ variable "cluster_name" {
 }
 
 variable "oidc_issuer_url" {
-  description = "OIDC issuer of the cluster (aws_eks_cluster.identity[0].oidc[0].issuer)"
+  description = "OIDC issuer of the cluster (`aws_eks_cluster.identity`[0].oidc[0].issuer)"
   type        = string
 }
 

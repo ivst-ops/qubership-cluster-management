@@ -1,15 +1,17 @@
 variable "cloud" {
-  description = "Cloud identifier supplied by Atmos as deployment context"
+  description = "Cloud identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
 variable "stage" {
-  type = string
+  description = "Stage name, passed by Atmos from the stack context"
+  type        = string
 }
 
 variable "environment" {
-  type = string
+  description = "Environment name; the names of the created resources start with it"
+  type        = string
 }
 
 variable "kubeconfig_path" {
@@ -19,16 +21,19 @@ variable "kubeconfig_path" {
 }
 
 variable "vpc_id" {
-  type = string
+  description = "ID of the VPC of the load balancer and its target groups"
+  type        = string
 }
 
 variable "subnet_ids" {
-  type = map(string)
+  description = "IDs of the subnets, by subnet key"
+  type        = map(string)
 }
 
 variable "tenant" {
-  type    = string
-  default = null
+  description = "Customer identifier, passed by Atmos from the stack context"
+  type        = string
+  default     = null
 }
 
 variable "certificate_arn" {
@@ -43,15 +48,17 @@ variable "certificate_arn" {
 }
 
 variable "headlamp_node_port" {
-  type = number
+  description = "Node port of the Headlamp service on the cluster nodes"
+  type        = number
 }
 variable "region" {
-  type    = string
-  default = "us-east-1"
+  description = "AWS region of the resources"
+  type        = string
+  default     = "us-east-1"
 }
 
 variable "local_endpoint" {
-  description = "Floci endpoint; null uses the real AWS APIs and normal credential chain"
+  description = "Floci endpoint of the local lab; null uses the real cloud APIs and the normal credential chain"
   type        = string
   default     = null
 }

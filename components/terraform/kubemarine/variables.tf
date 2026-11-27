@@ -1,25 +1,28 @@
 variable "tenant" {
-  type    = string
-  default = null
+  description = "Customer identifier, passed by Atmos from the stack context"
+  type        = string
+  default     = null
 }
 
 variable "stage" {
-  type    = string
-  default = null
+  description = "Stage name, passed by Atmos from the stack context"
+  type        = string
+  default     = null
 }
 
 variable "cloud" {
-  description = "Cloud identifier supplied by Atmos as deployment context"
+  description = "Cloud identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
 variable "environment" {
-  type = string
+  description = "Environment name; names the Kubemarine cluster (`<environment>.local`) and its working directory"
+  type        = string
 }
 
 variable "nodes" {
-  description = "Cluster VMs as output by any <cloud>/vms component; roles are Kubemarine roles"
+  description = "Cluster VMs as output by any `<cloud>/vms` component; roles are Kubemarine roles"
   type = list(object({
     name             = string
     roles            = list(string)
@@ -29,25 +32,26 @@ variable "nodes" {
 }
 
 variable "jump_host" {
-  description = "Jump host VM (any <cloud>/vms output entry); Kubemarine reaches the nodes through it"
+  description = "Jump host VM (any `<cloud>/vms` output entry); Kubemarine reaches the nodes through it"
   type = object({
     address = string
   })
 }
 
 variable "nexus_address" {
-  description = "Private address of the Nexus VM loaded by bundle/load.sh"
+  description = "Private address of the Nexus VM loaded by `bundle/load.sh`"
   type        = string
 }
 
 variable "mirrored_registries" {
-  description = "Registries of application images; containerd pulls <registry>/<path> from Nexus (bundle/manifest.yaml app_images)"
+  description = "Registries of application images; containerd pulls `<registry>/<path>` from Nexus (`bundle/manifest.yaml` `app_images`)"
   type        = list(string)
 }
 
 variable "ssh_user" {
-  type    = string
-  default = "ubuntu"
+  description = "User that Kubemarine connects as over SSH, on the nodes and the jump host"
+  type        = string
+  default     = "ubuntu"
 }
 
 variable "ssh_private_key" {
@@ -57,7 +61,7 @@ variable "ssh_private_key" {
 }
 
 variable "kubemarine" {
-  description = "Extra cluster.yaml fields (cluster_name, services, plugins, ...) merged over the generated ones"
+  description = "Extra `cluster.yaml` fields (for example `services`, `plugins`); the generated `nodes`, `gateway_nodes`, `registry`, package repositories and containerd mirrors are applied on top, so of the generated fields only `cluster_name` can be overridden"
   type        = any
   default     = {}
 }

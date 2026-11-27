@@ -1,12 +1,21 @@
 variable "cloud" {
-  description = "Cloud identifier supplied by Atmos as deployment context"
+  description = "Cloud identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
-variable "environment" { type = string }
-variable "region" { type = string }
-variable "project_id" { type = string }
+variable "environment" {
+  description = "Environment name; the names of the created resources start with it"
+  type        = string
+}
+variable "region" {
+  description = "Google Cloud region of the resources"
+  type        = string
+}
+variable "project_id" {
+  description = "Google Cloud project of the load balancer"
+  type        = string
+}
 
 variable "backend_instances" {
   description = "Self-links of backend VMs; manage ingress and health-check firewall rules for these VMs separately"
@@ -17,26 +26,29 @@ variable "backend_instances" {
   }
 }
 variable "port_range" {
-  type    = string
-  default = "80"
+  description = "Port or port range of the forwarding rule"
+  type        = string
+  default     = "80"
 }
 variable "health_check_port" {
-  type    = number
-  default = 80
+  description = "Port of the HTTP health check of the backend VMs"
+  type        = number
+  default     = 80
 }
 variable "health_check_path" {
-  type    = string
-  default = "/"
+  description = "Request path of the HTTP health check"
+  type        = string
+  default     = "/"
 }
 
 variable "tenant" {
-  description = "Customer identifier supplied by Atmos"
+  description = "Customer identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
 variable "stage" {
-  description = "Environment stage supplied by Atmos"
+  description = "Stage name, passed by Atmos from the stack context"
   type        = string
   default     = null
 }

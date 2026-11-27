@@ -1,35 +1,45 @@
 variable "tenant" {
-  description = "Customer identifier supplied by Atmos"
+  description = "Customer identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
 variable "stage" {
-  description = "Environment stage supplied by Atmos"
+  description = "Stage name, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
 variable "cloud" {
-  description = "Cloud identifier supplied by Atmos as deployment context"
+  description = "Cloud identifier, passed by Atmos from the stack context"
   type        = string
   default     = null
 }
 
-variable "environment" { type = string }
-variable "region" { type = string }
+variable "environment" {
+  description = "Environment name; the names of the created resources start with it"
+  type        = string
+}
+variable "region" {
+  description = "Azure region of the resources"
+  type        = string
+}
 variable "name" {
   description = "Group name: resource name prefix and the first Role tag"
   type        = string
 }
 
-variable "resource_group_name" { type = string }
+variable "resource_group_name" {
+  description = "Resource group of the VMs"
+  type        = string
+}
 variable "subnet_ids" {
-  description = "Subnet IDs by key, as output by the network component"
+  description = "IDs of the subnets, by subnet key"
   type        = map(string)
 }
 variable "image" {
-  type = object({ publisher = string, offer = string, sku = string, version = string })
+  description = "Marketplace image of the VMs: publisher, offer, SKU and version"
+  type        = object({ publisher = string, offer = string, sku = string, version = string })
   default = {
     publisher = "Canonical"
     offer     = "ubuntu-24_04-lts"
@@ -42,7 +52,7 @@ variable "ssh_public_key" {
   type        = string
 }
 variable "vms" {
-  description = "VMs by name; roles are Kubemarine roles or empty; instance_type is the VM size"
+  description = "VMs by name; roles are Kubemarine roles or empty; `instance_type` is the VM size"
   type = map(object({
     roles         = optional(list(string), [])
     instance_type = string
@@ -56,7 +66,7 @@ variable "public" {
   default     = false
 }
 variable "ports" {
-  description = "TCP ports open to allowed_cidrs"
+  description = "TCP ports open to `allowed_cidrs`"
   type        = list(number)
   default     = [22]
 }

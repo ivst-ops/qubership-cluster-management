@@ -5,31 +5,37 @@ variable "kubeconfig_path" {
 
 # Deployment context inherited from the Atmos stack.
 variable "cloud" {
-  type    = string
-  default = null
+  description = "Cloud identifier, not used by this component, accepted for a uniform stack context"
+  type        = string
+  default     = null
 }
 
 variable "tenant" {
-  type    = string
-  default = null
+  description = "Customer identifier, not used by this component, accepted for a uniform stack context"
+  type        = string
+  default     = null
 }
 
 variable "stage" {
-  type    = string
-  default = null
+  description = "Stage name, not used by this component, accepted for a uniform stack context"
+  type        = string
+  default     = null
 }
 
 variable "environment" {
-  type    = string
-  default = null
+  description = "Environment name, not used by this component, accepted for a uniform stack context"
+  type        = string
+  default     = null
 }
 
 variable "region" {
-  type    = string
-  default = null
+  description = "Region of the cloud, not used by this component, accepted for a uniform stack context"
+  type        = string
+  default     = null
 }
 
 variable "local_endpoint" {
-  type    = string
-  default = null
+  description = "Floci endpoint of the local lab, not used by this component, accepted for a uniform stack context"
+  type        = string
+  default     = null
 }

@@ -4,11 +4,12 @@ output "vpc_id" {
 }
 
 output "vpc_cidr" {
-  value = aws_vpc.main.cidr_block
+  description = "IPv4 address range of the VPC"
+  value       = aws_vpc.main.cidr_block
 }
 
 output "subnet_ids" {
-  description = "IDs of the subnets by their keys"
+  description = "IDs of the subnets, by subnet key"
 
   value = {
     for key, subnet in aws_subnet.main :

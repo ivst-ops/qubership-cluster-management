@@ -10,7 +10,7 @@ variable "ami_type" {
 }
 
 variable "is_custom_ami" {
-  description = "The launch template names the image itself: the user data carries the cluster connection (EKS adds none)"
+  description = "The launch template names the image: the user data then carries the cluster connection, which EKS does not add"
   type        = bool
   default     = false
 }
@@ -21,19 +21,19 @@ variable "cluster_name" {
 }
 
 variable "cluster_endpoint" {
-  description = "Kubernetes API endpoint (custom AMI only)"
+  description = "Kubernetes API endpoint of the cluster (only with `is_custom_ami = true`)"
   type        = string
   default     = null
 }
 
 variable "cluster_auth_base64" {
-  description = "Cluster CA in base64 (custom AMI only)"
+  description = "Certificate authority data of the cluster, base64 (only with `is_custom_ami = true`)"
   type        = string
   default     = null
 }
 
 variable "service_cidr" {
-  description = "Service CIDR of the cluster (kubernetes_network_config.service_ipv4_cidr); required with a custom AMI"
+  description = "Service CIDR of the cluster (`kubernetes_network_config.service_ipv4_cidr` of the cluster); required with `is_custom_ami = true`"
   type        = string
   default     = null
 }
@@ -59,7 +59,7 @@ variable "kubelet_extra_args" {
 }
 
 variable "bootstrap_labels" {
-  description = "Node labels (Bottlerocket custom AMI only; managed node groups set labels themselves)"
+  description = "Node labels, Bottlerocket with `is_custom_ami = true` only (managed node groups set labels themselves)"
   type        = map(string)
   default     = {}
   nullable    = false
